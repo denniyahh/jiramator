@@ -30,7 +30,7 @@ from jiramator.planner import (
     _extract_field,
     _extract_summary,
     _prompt_pi_number,
-    _prompt_versions,
+    _prompt_fix_versions,
     run_plan,
 )
 
@@ -608,6 +608,23 @@ class TestPromptHelpers:
         assert pi_num == "42"
         assert pi_label == "PI42"
 
+    @patch("jiramator.planner.Prompt.ask", return_value="PI28")
+    def test_prompt_pi_number_normalizes_pi_prefix(self, mock_prompt, console):
+        pi_num, pi_label = _prompt_pi_number(console)
+        assert pi_num == "28"
+        assert pi_label == "PI28"
+
+    @patch("jiramator.planner.Prompt.ask", return_value="pi28")
+    def test_prompt_pi_number_normalizes_lowercase_pi(self, mock_prompt, console):
+        pi_num, pi_label = _prompt_pi_number(console)
+        assert pi_num == "28"
+        assert pi_label == "PI28"
+
+    @patch("jiramator.planner.Prompt.ask", return_value="PI")
+    def test_prompt_pi_number_bare_pi_exits(self, mock_prompt, console):
+        with pytest.raises(SystemExit):
+            _prompt_pi_number(console)
+
     @patch("jiramator.planner.Prompt.ask", return_value="")
     def test_prompt_pi_number_empty_exits(self, mock_prompt, console):
         with pytest.raises(SystemExit):
@@ -615,17 +632,17 @@ class TestPromptHelpers:
 
     @patch("jiramator.planner.Prompt.ask", side_effect=["26.1.1", "26.1.2"])
     @patch("jiramator.planner.IntPrompt.ask", return_value=2)
-    def test_prompt_versions(self, mock_int, mock_prompt, console):
-        versions = _prompt_versions(console)
+    def test_prompt_fix_versions(self, mock_int, mock_prompt, console):
+        versions = _prompt_fix_versions(console)
         assert versions == ["26.1.1", "26.1.2"]
 
     @patch("jiramator.planner.IntPrompt.ask", return_value=0)
-    def test_prompt_versions_zero_exits(self, mock_int, console):
+    def test_prompt_fix_versions_zero_exits(self, mock_int, console):
         with pytest.raises(SystemExit):
-            _prompt_versions(console)
+            _prompt_fix_versions(console)
 
     @patch("jiramator.planner.Prompt.ask", return_value="  ")
     @patch("jiramator.planner.IntPrompt.ask", return_value=1)
-    def test_prompt_versions_empty_string_exits(self, mock_int, mock_prompt, console):
+    def test_prompt_fix_versions_empty_string_exits(self, mock_int, mock_prompt, console):
         with pytest.raises(SystemExit):
-            _prompt_versions(console)
+            _prompt_fix_versions(console)

@@ -29,5 +29,8 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
+# Secrets
+.envrc
+
 # Hermes agent state (not part of the project)
 .hermes/
