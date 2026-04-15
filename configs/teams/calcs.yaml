@@ -1,0 +1,94 @@
+# Calcs team Jiramator configuration
+#
+# Defines recurring epics and ticket templates for each PI.
+# All {variables} are interpolated at runtime by the ticket builder.
+
+project_key: CA
+team_name: Calcs
+board_id: null                    # Set to board ID if sprint assignment is desired
+sprint_name_template: null        # e.g. "CA Sprint {pi_num}.{sprint_num}"
+
+# ---------------------------------------------------------------------------
+# Epics created at the start of each PI
+# ---------------------------------------------------------------------------
+recurring_epics:
+  - key: bau
+    summary: "{team_name} {pi_label} - BAU Work"
+  - key: misc
+    summary: "{team_name} {pi_label} - Miscellaneous Work"
+
+# ---------------------------------------------------------------------------
+# Tickets generated once per release version
+# e.g. if PI28 has versions 26.1.1, 26.1.2, 26.2.0 → 6 templates × 3 = 18 tickets
+# ---------------------------------------------------------------------------
+per_release_tickets:
+  - summary: "Testing - {version} Pre-regression test"
+    fields:
+      issuetype: Task
+      priority: Medium
+      labels: ["{pi_label}", "Testing"]
+      fixVersions: ["{version}"]
+      customfield_10026: 0.5           # story points
+      customfield_10014: "$epic:misc"   # epic link → Miscellaneous epic
+
+  - summary: "Testing - {version} Post-regression test"
+    fields:
+      issuetype: Task
+      priority: Medium
+      labels: ["{pi_label}", "Testing"]
+      fixVersions: ["{version}"]
+      customfield_10026: 0.5
+      customfield_10014: "$epic:misc"
+
+  - summary: "Testing - Update Sanity Tester for {version}"
+    fields:
+      issuetype: Task
+      priority: Medium
+      labels: ["{pi_label}"]
+      fixVersions: ["{version}"]
+      customfield_10026: 0.5
+      customfield_10014: "$epic:misc"
+
+  - summary: "Testing - {version} Auto-classifier pre-regression test"
+    fields:
+      issuetype: Task
+      priority: Medium
+      labels: ["{pi_label}", "Testing"]
+      fixVersions: ["{version}"]
+      customfield_10026: 0.5
+      customfield_10014: "$epic:misc"
+
+  - summary: "Testing - {version} Auto-classifier post-regression test"
+    fields:
+      issuetype: Task
+      priority: Medium
+      labels: ["{pi_label}", "Testing"]
+      fixVersions: ["{version}"]
+      customfield_10026: 0.5
+      customfield_10014: "$epic:misc"
+
+  - summary: "Testing - {version} Pre-release framework & defaults review"
+    fields:
+      issuetype: Task
+      priority: Medium
+      labels: ["{pi_label}"]
+      fixVersions: ["{version}"]
+      customfield_10026: 0.5
+      customfield_10014: "$epic:misc"
+
+# ---------------------------------------------------------------------------
+# Tickets generated once per sprint
+# Standard sprints: 1 ticket each. Long sprints: extra tickets with suffix.
+# Sprint 6 is long → generates "Prod Support (Sprint 6a)" and "... (Sprint 6b)"
+# ---------------------------------------------------------------------------
+per_sprint_tickets:
+  - summary: "Misc - Prod Support (Sprint {sprint_num})"
+    fields:
+      issuetype: Task
+      priority: Medium
+      labels: ["{pi_label}", "Prod_Support"]
+      fixVersions: ["{pi_label}"]
+      customfield_10026: 2.0
+      customfield_10014: "$epic:misc"
+    extra_on_long_sprint: 1
+    long_sprint_suffix: ["a", "b"]   # Sprint 6 → "Sprint 6a" + "Sprint 6b"

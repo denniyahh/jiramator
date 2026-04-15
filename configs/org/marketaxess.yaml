@@ -1,0 +1,24 @@
+# MarketAxess org-level Jiramator configuration
+#
+# Shared across all teams. Defines the Jira instance,
+# custom field IDs, and sprint cadence.
+
+jira_url: https://marketaxess.atlassian.net
+
+# Environment variable names — jiramator reads credentials from these
+# at runtime. Never store secrets in config files.
+jira_email_env: JIRA_EMAIL
+jira_token_env: JIRA_TOKEN
+
+# Mapping of logical names to Jira custom field IDs.
+# Look these up via Jira admin or API: /rest/api/3/field
+custom_fields:
+  story_points: customfield_10026
+  epic_link: customfield_10014
+
+# PI sprint cadence
+sprints:
+  count: 6
+  standard_length_weeks: 2
+  long_length_weeks: 3
+  long_sprints: [6]  # Sprint 6 is 3 weeks
