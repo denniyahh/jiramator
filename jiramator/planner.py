@@ -1,7 +1,7 @@
 """Planner — interactive PI planning orchestration.
 
 This is the brains of the ``plan`` command.  It handles:
-    1. Interactive prompts (PI number, release count, version strings)
+    1. Interactive prompts (PI number, fix version count, version strings)
     2. Fix version check-and-create
     3. Ticket payload generation via the builder
     4. Rich Table dry-run preview
@@ -40,8 +40,13 @@ def _prompt_pi_number(console: Console) -> tuple[str, str]:
     Returns:
         (pi_num, pi_label) — e.g. ("28", "PI28").
     """
-    pi_num = Prompt.ask("[bold]What is the PI number?[/]", console=console)
-    pi_num = pi_num.strip()
+    raw = Prompt.ask("[bold]What is the PI number?[/]", console=console)
+    raw = raw.strip()
+    if not raw:
+        console.print("[red]PI number cannot be empty.[/]")
+        sys.exit(1)
+    # Normalize: "PI28", "pi28", "28" all → pi_num="28", pi_label="PI28"
+    pi_num = raw.upper().removeprefix("PI")
     if not pi_num:
         console.print("[red]PI number cannot be empty.[/]")
         sys.exit(1)
@@ -50,28 +55,28 @@ def _prompt_pi_number(console: Console) -> tuple[str, str]:
     return pi_num, pi_label
 
 
-def _prompt_versions(console: Console) -> list[str]:
-    """Ask the user how many releases and their version strings.
+def _prompt_fix_versions(console: Console) -> list[str]:
+    """Ask the user how many fix versions and their version strings.
 
     Returns:
         List of version strings (e.g. ["26.1.1", "26.1.2", "26.2.0"]).
     """
-    release_count = IntPrompt.ask(
-        "[bold]How many releases in this PI?[/]", console=console
+    fix_version_count = IntPrompt.ask(
+        "[bold]How many fix versions in this PI?[/]", console=console
     )
-    if release_count < 1:
-        console.print("[red]Release count must be at least 1.[/]")
+    if fix_version_count < 1:
+        console.print("[red]Fix version count must be at least 1.[/]")
         sys.exit(1)
 
     versions: list[str] = []
-    for i in range(1, release_count + 1):
+    for i in range(1, fix_version_count + 1):
         v = Prompt.ask(
-            f"  Release {i}/{release_count} version string",
+            f"  Fix version {i}/{fix_version_count} version string",
             console=console,
         )
         v = v.strip()
         if not v:
-            console.print(f"[red]Version string {i} cannot be empty.[/]")
+            console.print(f"[red]Fix version string {i} cannot be empty.[/]")
             sys.exit(1)
         versions.append(v)
 
@@ -316,7 +321,7 @@ def run_plan(
     This is the single entry point called by ``cli.py``.
 
     Steps:
-        1. Prompt for PI number, release count, version strings
+        1. Prompt for PI number, fix version count, version strings
         2. Build initial payloads (dry-run: epic refs unresolved)
         3. Display preview table
         4. If --dry-run: exit here
@@ -335,7 +340,7 @@ def run_plan(
     console.print("\n[bold]── PI Planning ──[/]\n")
 
     pi_num, pi_label = _prompt_pi_number(console)
-    versions = _prompt_versions(console)
+    versions = _prompt_fix_versions(console)
 
     # Sprint assignment info
     if team_config.board_id is not None:
