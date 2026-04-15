@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=75.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jiramator"
+version = "0.1.0"
+description = "Generic, config-driven Jira ticket automation for PI planning and beyond"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "click>=8.1",
+    "pydantic>=2.0",
+    "pyyaml>=6.0",
+    "requests>=2.31",
+    "rich>=13.0",
+]
+
+[project.scripts]
+jiramator = "jiramator.cli:cli"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-mock>=3.12",
+]
+
+[tool.setuptools.packages.find]
+include = ["jiramator*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
