@@ -155,12 +155,16 @@ def build_epics(
     """
     epics = []
     for epic_tmpl in team_config.recurring_epics:
-        resolved_summary = resolve_value(epic_tmpl.summary, variables, {})
-        fields: dict[str, Any] = {
-            "project": {"key": team_config.project_key},
-            "summary": resolved_summary,
-            "issuetype": {"name": "Epic"},
-        }
+        fields = _build_fields_payload(
+            epic_tmpl.fields,
+            epic_tmpl.summary,
+            team_config.project_key,
+            variables,
+            {},
+        )
+        # Epics must always be created as Jira Epic issues, regardless of what
+        # might be present in the template fields.
+        fields["issuetype"] = {"name": "Epic"}
         epics.append({
             "ref_key": epic_tmpl.key,
             "payload": {"fields": fields},
@@ -185,7 +189,7 @@ def build_per_release_tickets(
         epic_keys: Mapping of epic ref keys to Jira issue keys.
 
     Returns:
-        List of {"fields": {...}} payloads, one per template × version.
+        List of {"fields": {...}, "_sprint_num": str|None} payloads, one per template × version.
     """
     tickets = []
     for version in versions:
@@ -198,7 +202,14 @@ def build_per_release_tickets(
                 version_vars,
                 epic_keys,
             )
-            tickets.append({"fields": fields})
+            # Resolve sprint number from release_sprint_map + sprint_group
+            sprint_num = None
+            if tmpl.sprint_group and version in team_config.release_sprint_map:
+                sprint_num = team_config.release_sprint_map[version].get(tmpl.sprint_group)
+            ticket: dict[str, Any] = {"fields": fields}
+            if sprint_num is not None:
+                ticket["_sprint_num"] = str(sprint_num)
+            tickets.append(ticket)
     return tickets
 
 
@@ -229,7 +240,7 @@ def _build_sprint_ticket(
         sprint_vars,
         epic_keys,
     )
-    return {"fields": fields}
+    return {"fields": fields, "_sprint_num": sprint_label}
 
 
 def build_per_sprint_tickets(

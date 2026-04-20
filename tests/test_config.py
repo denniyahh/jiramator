@@ -17,6 +17,7 @@ from jiramator.config import (
     load_org_config,
     load_team_config,
 )
+from pydantic import ValidationError
 
 
 # ---------------------------------------------------------------------------
@@ -335,9 +336,29 @@ class TestEpicTemplate:
         assert epic.key == "bau"
         assert "{team_name}" in epic.summary
 
+    def test_valid_epic_with_fields(self) -> None:
+        epic = EpicTemplate(
+            key="misc",
+            summary="{team_name} {pi_label} - Misc Work",
+            fields={
+                "labels": ["{pi_label}", "Epic"],
+                "customfield_10237": {"value": "Low"},
+            },
+        )
+        assert epic.fields["labels"] == ["{pi_label}", "Epic"]
+        assert epic.fields["customfield_10237"] == {"value": "Low"}
+
     def test_unknown_template_var_in_summary_raises(self) -> None:
         with pytest.raises(ValueError, match="Unknown template variable"):
             EpicTemplate(key="bad", summary="{team_name} {bogus_var} - Epic")
+
+    def test_unknown_template_var_in_fields_raises(self) -> None:
+        with pytest.raises(ValueError, match="Unknown template variable"):
+            EpicTemplate(
+                key="bad",
+                summary="Static Epic",
+                fields={"labels": ["{bogus_var}"]},
+            )
 
     def test_no_template_vars_ok(self) -> None:
         """Static summary with no variables is fine."""
@@ -571,6 +592,72 @@ class TestTeamConfig:
 
 
 # ---------------------------------------------------------------------------
+# existing_epics config tests
+# ---------------------------------------------------------------------------
+
+
+class TestExistingEpics:
+    """Tests for existing_epics field on TeamConfig."""
+
+    MINIMAL = {
+        "project_key": "CA",
+        "team_name": "Calcs",
+    }
+
+    def test_existing_epics_default_empty(self) -> None:
+        cfg = TeamConfig(**self.MINIMAL)
+        assert cfg.existing_epics == {}
+
+    def test_existing_epics_accepted(self) -> None:
+        cfg = TeamConfig(**self.MINIMAL, existing_epics={"bau": "CA-123", "misc": "CA-456"})
+        assert cfg.existing_epics == {"bau": "CA-123", "misc": "CA-456"}
+
+    def test_get_epic_keys_combines_both(self) -> None:
+        cfg = TeamConfig(
+            **self.MINIMAL,
+            existing_epics={"bau": "CA-123"},
+            recurring_epics=[EpicTemplate(key="misc", summary="Misc")],
+        )
+        assert sorted(cfg.get_epic_keys()) == ["bau", "misc"]
+
+    def test_epic_ref_resolves_against_existing(self) -> None:
+        """$epic:ref should validate against existing_epics too."""
+        cfg = TeamConfig(
+            **self.MINIMAL,
+            existing_epics={"bau": "CA-123"},
+            per_release_tickets=[
+                TicketTemplate(
+                    summary="Task",
+                    issuetype="Story",
+                    fields={"customfield_10014": "$epic:bau"},
+                ),
+            ],
+        )
+        assert cfg.per_release_tickets[0].fields["customfield_10014"] == "$epic:bau"
+
+    def test_overlap_between_existing_and_recurring_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="existing_epics and recurring_epics"):
+            TeamConfig(
+                **self.MINIMAL,
+                existing_epics={"bau": "CA-123"},
+                recurring_epics=[EpicTemplate(key="bau", summary="BAU")],
+            )
+
+    def test_epic_ref_missing_from_both_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="undefined epic.*unknown"):
+            TeamConfig(
+                **self.MINIMAL,
+                per_release_tickets=[
+                    TicketTemplate(
+                        summary="Task",
+                        issuetype="Story",
+                        fields={"customfield_10014": "$epic:unknown"},
+                    ),
+                ],
+            )
+
+
+# ---------------------------------------------------------------------------
 # Team config YAML loading
 # ---------------------------------------------------------------------------
 
@@ -595,14 +682,15 @@ class TestLoadTeamConfig:
             load_team_config(p)
 
     def test_load_real_calcs_config(self) -> None:
-        """Verify the shipped Calcs config loads and validates."""
+        """Verify the shipped Calcs team config loads and validates."""
         if not TEAM_CONFIG_PATH.exists():
             pytest.skip("Calcs team config not present")
         cfg = load_team_config(TEAM_CONFIG_PATH)
         assert cfg.project_key == "CA"
         assert cfg.team_name == "Calcs"
-        assert len(cfg.recurring_epics) == 2
-        assert cfg.get_epic_keys() == ["bau", "misc"]
+        assert len(cfg.recurring_epics) == 0
+        assert cfg.existing_epics == {"bau": "CA-4829", "misc": "CA-4830"}
+        assert sorted(cfg.get_epic_keys()) == ["bau", "misc"]
         assert len(cfg.per_release_tickets) == 6
         assert len(cfg.per_sprint_tickets) == 1
         # Prod support has long sprint expansion

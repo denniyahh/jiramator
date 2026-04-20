@@ -185,12 +185,22 @@ class EpicTemplate(BaseModel):
 
     key: str = Field(description="Internal reference key (e.g. 'bau', 'misc')")
     summary: str = Field(description="Epic summary template (supports {variables})")
+    fields: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Jira field values for the epic — keys are field names or custom field IDs",
+    )
 
     @field_validator("summary")
     @classmethod
     def validate_summary_vars(cls, v: str) -> str:
         _validate_template_vars(v, "epic.summary")
         return v
+
+    @model_validator(mode="after")
+    def validate_field_template_vars(self) -> EpicTemplate:
+        """Validate template variables in all epic field strings."""
+        _collect_template_vars_in_fields(self.fields, f"epic[{self.key}]")
+        return self
 
 
 class TicketTemplate(BaseModel):
@@ -209,6 +219,11 @@ class TicketTemplate(BaseModel):
     long_sprint_suffix: list[str] = Field(
         default_factory=list,
         description="Suffixes for sprint_num on long sprints (e.g. ['a', 'b'])",
+    )
+    sprint_group: str | None = Field(
+        default=None,
+        description="Sprint group for release-sprint mapping (e.g. 'pre', 'post'). "
+                    "Used with release_sprint_map to assign per-release tickets to sprints.",
     )
 
     @field_validator("summary")
@@ -244,7 +259,16 @@ class TeamConfig(BaseModel):
         default=None,
         description="Sprint name pattern for matching (e.g. 'CA Sprint {pi_num}.{sprint_num}')",
     )
+    release_sprint_map: dict[str, dict[str, int]] = Field(
+        default_factory=dict,
+        description="Maps version → {sprint_group: sprint_number} for per-release sprint assignment. "
+                    "e.g. {'26.2.1': {'pre': 2, 'post': 3}}",
+    )
 
+    existing_epics: dict[str, str] = Field(
+        default_factory=dict,
+        description="Pre-existing epic keys to reuse instead of creating (ref_key → Jira key, e.g. {bau: CA-1234})",
+    )
     recurring_epics: list[EpicTemplate] = Field(
         default_factory=list,
         description="Epics to create at the start of each PI",
@@ -268,9 +292,21 @@ class TeamConfig(BaseModel):
         return v
 
     @model_validator(mode="after")
+    def validate_no_epic_key_overlap(self) -> TeamConfig:
+        """Ensure no key appears in both existing_epics and recurring_epics."""
+        recurring_keys = {e.key for e in self.recurring_epics}
+        overlap = recurring_keys & set(self.existing_epics)
+        if overlap:
+            raise ValueError(
+                f"Epic key(s) defined in both existing_epics and recurring_epics: "
+                f"{', '.join(sorted(overlap))}. Each key must appear in only one."
+            )
+        return self
+
+    @model_validator(mode="after")
     def validate_epic_refs(self) -> TeamConfig:
-        """Ensure all $epic:key references point to defined recurring_epics."""
-        epic_keys = {e.key for e in self.recurring_epics}
+        """Ensure all $epic:key references point to defined recurring_epics or existing_epics."""
+        epic_keys = {e.key for e in self.recurring_epics} | set(self.existing_epics)
         all_templates = self.per_release_tickets + self.per_sprint_tickets
 
         for i, tmpl in enumerate(all_templates):
@@ -298,8 +334,8 @@ class TeamConfig(BaseModel):
         return self
 
     def get_epic_keys(self) -> list[str]:
-        """Return the list of epic reference keys."""
-        return [e.key for e in self.recurring_epics]
+        """Return the list of all epic reference keys (recurring + existing)."""
+        return [e.key for e in self.recurring_epics] + list(self.existing_epics.keys())
 
 
 def load_team_config(path: str | Path) -> TeamConfig:

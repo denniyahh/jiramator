@@ -5,17 +5,28 @@
 
 project_key: CA
 team_name: Calcs
-board_id: null                    # Set to board ID if sprint assignment is desired
-sprint_name_template: null        # e.g. "CA Sprint {pi_num}.{sprint_num}"
+board_id: 362
+sprint_name_template: "PI-{pi_num}.{sprint_num}-Calc -TI83"
+
+release_sprint_map:
+  "26.2.1":
+    pre: 2
+    post: 3
+  "26.2.2":
+    pre: 4
+    post: 5
+  "26.3.0":
+    pre: 5
+    post: 6
+
+existing_epics:
+  bau: CA-4829
+  misc: CA-4830
 
 # ---------------------------------------------------------------------------
 # Epics created at the start of each PI
 # ---------------------------------------------------------------------------
-recurring_epics:
-  - key: bau
-    summary: "{team_name} {pi_label} - BAU Work"
-  - key: misc
-    summary: "{team_name} {pi_label} - Miscellaneous Work"
+recurring_epics: []
 
 # ---------------------------------------------------------------------------
 # Tickets generated once per release version
@@ -23,6 +34,7 @@ recurring_epics:
 # ---------------------------------------------------------------------------
 per_release_tickets:
   - summary: "Testing - {version} Pre-regression test"
+    sprint_group: "pre"
     fields:
       issuetype: Task
       priority: Medium
@@ -30,8 +42,10 @@ per_release_tickets:
       fixVersions: ["{version}"]
       customfield_10026: 0.5           # story points
       customfield_10014: "$epic:misc"   # epic link → Miscellaneous epic
+      customfield_10273: [{value: "No"}] # API Impact (required on CA)
 
   - summary: "Testing - {version} Post-regression test"
+    sprint_group: "post"
     fields:
       issuetype: Task
       priority: Medium
@@ -39,8 +53,10 @@ per_release_tickets:
       fixVersions: ["{version}"]
       customfield_10026: 0.5
       customfield_10014: "$epic:misc"
+      customfield_10273: [{value: "No"}]
 
   - summary: "Testing - Update Sanity Tester for {version}"
+    sprint_group: "pre"
     fields:
       issuetype: Task
       priority: Medium
@@ -48,8 +64,10 @@ per_release_tickets:
       fixVersions: ["{version}"]
       customfield_10026: 0.5
       customfield_10014: "$epic:misc"
+      customfield_10273: [{value: "No"}]
 
   - summary: "Testing - {version} Auto-classifier pre-regression test"
+    sprint_group: "pre"
     fields:
       issuetype: Task
       priority: Medium
@@ -57,8 +75,10 @@ per_release_tickets:
       fixVersions: ["{version}"]
       customfield_10026: 0.5
       customfield_10014: "$epic:misc"
+      customfield_10273: [{value: "No"}]
 
   - summary: "Testing - {version} Auto-classifier post-regression test"
+    sprint_group: "post"
     fields:
       issuetype: Task
       priority: Medium
@@ -66,8 +86,10 @@ per_release_tickets:
       fixVersions: ["{version}"]
       customfield_10026: 0.5
       customfield_10014: "$epic:misc"
+      customfield_10273: [{value: "No"}]
 
   - summary: "Testing - {version} Pre-release framework & defaults review"
+    sprint_group: "pre"
     fields:
       issuetype: Task
       priority: Medium
@@ -75,6 +97,7 @@ per_release_tickets:
       fixVersions: ["{version}"]
       customfield_10026: 0.5
       customfield_10014: "$epic:misc"
+      customfield_10273: [{value: "No"}]
 
 # ---------------------------------------------------------------------------
 # Tickets generated once per sprint
@@ -90,5 +113,6 @@ per_sprint_tickets:
       fixVersions: ["{pi_label}"]
       customfield_10026: 2.0
       customfield_10014: "$epic:misc"
+      customfield_10273: [{value: "No"}]
     extra_on_long_sprint: 1
     long_sprint_suffix: ["a", "b"]   # Sprint 6 → "Sprint 6a" + "Sprint 6b"

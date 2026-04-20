@@ -278,6 +278,35 @@ class TestBuildEpics:
         assert epic["payload"]["fields"]["summary"] == "TestTeam PI28 - Misc"
         assert epic["payload"]["fields"]["issuetype"] == {"name": "Epic"}
 
+    def test_epic_payload_includes_template_fields(self, org_config, base_vars):
+        tc = TeamConfig(
+            project_key="X",
+            team_name="TestTeam",
+            recurring_epics=[
+                EpicTemplate(
+                    key="misc",
+                    summary="{team_name} {pi_label} - Misc",
+                    fields={
+                        "labels": ["{pi_label}", "Epic"],
+                        "priority": "High",
+                        "customfield_11623": {"value": ["Internal Initiative"]},
+                        "customfield_10237": {"value": "Low"},
+                        "issuetype": "Task",
+                    },
+                ),
+            ],
+        )
+
+        epics = build_epics(org_config, tc, base_vars)
+        fields = epics[0]["payload"]["fields"]
+
+        assert fields["summary"] == "TestTeam PI28 - Misc"
+        assert fields["labels"] == ["PI28", "Epic"]
+        assert fields["priority"] == {"name": "High"}
+        assert fields["customfield_11623"] == {"value": ["Internal Initiative"]}
+        assert fields["customfield_10237"] == {"value": "Low"}
+        assert fields["issuetype"] == {"name": "Epic"}
+
     def test_multiple_epics(self, org_config, base_vars):
         tc = TeamConfig(
             project_key="X",

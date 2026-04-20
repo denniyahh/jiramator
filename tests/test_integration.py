@@ -92,13 +92,13 @@ class TestConfigLoading:
     def test_team_config_loads(self, team_config):
         assert team_config.project_key == "CA"
         assert team_config.team_name == "Calcs"
-        assert team_config.board_id is None
-        assert team_config.sprint_name_template is None
+        assert team_config.board_id == 362
+        assert team_config.sprint_name_template == "PI-{pi_num}.{sprint_num}-Calc -TI83"
 
     def test_team_has_expected_epic_count(self, team_config):
-        assert len(team_config.recurring_epics) == 2
-        keys = {e.key for e in team_config.recurring_epics}
-        assert keys == {"bau", "misc"}
+        assert len(team_config.recurring_epics) == 0
+        assert team_config.existing_epics == {"bau": "CA-4829", "misc": "CA-4830"}
+        assert sorted(team_config.get_epic_keys()) == ["bau", "misc"]
 
     def test_team_has_expected_per_release_count(self, team_config):
         assert len(team_config.per_release_tickets) == 6
@@ -121,7 +121,8 @@ class TestTicketCounts:
     """Verify build_all produces the correct number of payloads."""
 
     def test_epic_count(self, all_payloads):
-        assert len(all_payloads["epics"]) == 2
+        # No recurring epics — using existing_epics instead
+        assert len(all_payloads["epics"]) == 0
 
     def test_per_release_count(self, all_payloads):
         # 6 templates × 3 versions = 18
@@ -139,7 +140,7 @@ class TestTicketCounts:
             + len(all_payloads["per_release"])
             + len(all_payloads["per_sprint"])
         )
-        assert total == 27
+        assert total == 25  # 0 epics + 18 per-release + 7 per-sprint
 
 
 # ---------------------------------------------------------------------------
@@ -148,27 +149,14 @@ class TestTicketCounts:
 
 
 class TestEpicPayloads:
-    """Verify epic payloads have correct structure and resolved values."""
+    """With existing_epics, no epic payloads are generated."""
 
-    def test_epic_ref_keys(self, all_payloads):
-        ref_keys = [e["ref_key"] for e in all_payloads["epics"]]
-        assert ref_keys == ["bau", "misc"]
+    def test_no_epic_payloads_with_existing_epics(self, all_payloads):
+        assert all_payloads["epics"] == []
 
-    def test_bau_epic_summary(self, all_payloads):
-        bau = all_payloads["epics"][0]
-        assert bau["payload"]["fields"]["summary"] == "Calcs PI28 - BAU Work"
-
-    def test_misc_epic_summary(self, all_payloads):
-        misc = all_payloads["epics"][1]
-        assert misc["payload"]["fields"]["summary"] == "Calcs PI28 - Miscellaneous Work"
-
-    def test_epic_issuetype(self, all_payloads):
-        for epic in all_payloads["epics"]:
-            assert epic["payload"]["fields"]["issuetype"] == {"name": "Epic"}
-
-    def test_epic_project_key(self, all_payloads):
-        for epic in all_payloads["epics"]:
-            assert epic["payload"]["fields"]["project"] == {"key": "CA"}
+    def test_existing_epic_keys_available(self, team_config):
+        assert team_config.existing_epics["bau"] == "CA-4829"
+        assert team_config.existing_epics["misc"] == "CA-4830"
 
 
 # ---------------------------------------------------------------------------
@@ -315,7 +303,7 @@ class TestDryRun:
         )
 
     def test_counts_match_live_run(self, dry_payloads):
-        assert len(dry_payloads["epics"]) == 2
+        assert len(dry_payloads["epics"]) == 0  # no recurring_epics in calcs config
         assert len(dry_payloads["per_release"]) == 18
         assert len(dry_payloads["per_sprint"]) == 7
 
