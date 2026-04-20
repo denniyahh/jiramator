@@ -28,6 +28,9 @@ from jiramator.config import OrgConfig, TeamConfig
 from jiramator.jira_client import JiraApiError, JiraClient
 from jiramator.ticket_builder import build_all
 
+# Sprint field ID in Jira (customfield_10021 accepts sprint ID as integer)
+_SPRINT_FIELD = "customfield_10021"
+
 
 # ---------------------------------------------------------------------------
 # Prompt helpers
@@ -197,11 +200,13 @@ def _display_preview(
         table.add_column("Summary", style="bold")
         table.add_column("Type", style="green")
         table.add_column("Fix Version(s)", style="yellow")
+        table.add_column("Sprint", style="cyan")
         for i, ticket in enumerate(per_release, 1):
             summary = _extract_summary(ticket)
             issue_type = _extract_field(ticket, "issuetype", "?")
             fix_vers = _extract_field(ticket, "fixVersions", "")
-            table.add_row(str(i), summary, issue_type, fix_vers)
+            sprint = ticket.get("_sprint_num", "")
+            table.add_row(str(i), summary, issue_type, fix_vers, sprint)
         console.print(table)
         total += len(per_release)
 
@@ -212,15 +217,82 @@ def _display_preview(
         table.add_column("#", style="dim", width=4)
         table.add_column("Summary", style="bold")
         table.add_column("Type", style="green")
+        table.add_column("Sprint", style="cyan")
         for i, ticket in enumerate(per_sprint, 1):
             summary = _extract_summary(ticket)
             issue_type = _extract_field(ticket, "issuetype", "?")
-            table.add_row(str(i), summary, issue_type)
+            sprint = ticket.get("_sprint_num", "")
+            table.add_row(str(i), summary, issue_type, sprint)
         console.print(table)
         total += len(per_sprint)
 
     console.print(f"\n[bold]Total tickets to create: {total}[/]")
     return total
+
+
+# ---------------------------------------------------------------------------
+# Sprint resolution
+# ---------------------------------------------------------------------------
+
+
+def _resolve_sprint_ids(
+    client: JiraClient,
+    team_config: TeamConfig,
+    pi_num: str,
+    payloads: list[dict[str, Any]],
+    console: Console,
+) -> None:
+    """Resolve _sprint_num annotations to real Jira sprint IDs.
+
+    Fetches sprints from the configured board, matches them against the
+    sprint_name_template, and injects ``customfield_10021`` into each payload.
+    Mutates payloads in place. Strips ``_sprint_num`` after resolution.
+
+    Args:
+        client: Authenticated Jira client.
+        team_config: Team config with board_id and sprint_name_template.
+        pi_num: The PI number (e.g. "28").
+        payloads: List of ticket payloads (may contain ``_sprint_num``).
+        console: Rich console for output.
+    """
+    if team_config.board_id is None or not team_config.sprint_name_template:
+        return
+
+    # Fetch all active + future sprints from the board
+    sprints = client.get_board_sprints(team_config.board_id)
+
+    # Build a mapping of sprint_num → sprint ID by rendering the name template
+    # for each possible sprint_num and matching against fetched sprint names.
+    sprint_name_to_id = {s["name"]: s["id"] for s in sprints}
+
+    # Collect all unique sprint_num values we need to resolve
+    needed_nums = {p["_sprint_num"] for p in payloads if "_sprint_num" in p}
+
+    sprint_num_to_id: dict[str, int] = {}
+    unresolved: list[str] = []
+    for num in sorted(needed_nums):
+        expected_name = team_config.sprint_name_template.format(
+            pi_num=pi_num, sprint_num=num,
+        )
+        if expected_name in sprint_name_to_id:
+            sprint_num_to_id[num] = sprint_name_to_id[expected_name]
+            console.print(
+                f"  [green]✓[/] Sprint {num} → [cyan]{expected_name}[/] (id={sprint_num_to_id[num]})"
+            )
+        else:
+            unresolved.append(num)
+
+    if unresolved:
+        console.print(
+            f"  [yellow]⚠[/] Could not resolve sprint(s): {', '.join(unresolved)}. "
+            f"Those tickets will be created without sprint assignment."
+        )
+
+    # Inject sprint IDs into payloads
+    for payload in payloads:
+        sprint_num = payload.pop("_sprint_num", None)
+        if sprint_num and sprint_num in sprint_num_to_id:
+            payload["fields"][_SPRINT_FIELD] = sprint_num_to_id[sprint_num]
 
 
 # ---------------------------------------------------------------------------
@@ -403,8 +475,15 @@ def run_plan(
     # -- Step 8: Create epics -----------------------------------------------
     console.print("\n[bold]Creating tickets...[/]\n")
 
+    # Start with pre-existing epic keys from config
+    epic_keys: dict[str, str] = dict(team_config.existing_epics)
+    if epic_keys:
+        for ref_key, jira_key in epic_keys.items():
+            console.print(f"  [cyan]→[/] Epic [bold]{jira_key}[/] ({ref_key}) [dim]pre-existing[/]")
+
     try:
-        epic_keys = _create_epics(client, all_payloads["epics"], console)
+        created_keys = _create_epics(client, all_payloads["epics"], console)
+        epic_keys.update(created_keys)
     except JiraApiError as exc:
         console.print(f"\n[red bold]Failed to create epics:[/] {exc}")
         sys.exit(1)
@@ -419,6 +498,23 @@ def run_plan(
         versions=versions,
         epic_keys=epic_keys,
     )
+
+    # -- Step 9b: Sprint assignment ------------------------------------------
+    if team_config.board_id is not None:
+        console.print("\n[bold]Resolving sprints...[/]\n")
+        all_ticketable = final_payloads["per_release"] + final_payloads["per_sprint"]
+        try:
+            _resolve_sprint_ids(client, team_config, pi_num, all_ticketable, console)
+        except JiraApiError as exc:
+            console.print(f"\n[yellow]⚠ Sprint resolution failed:[/] {exc}")
+            console.print("  Tickets will be created without sprint assignment.")
+            # Still need to strip _sprint_num metadata
+            for p in final_payloads["per_release"] + final_payloads["per_sprint"]:
+                p.pop("_sprint_num", None)
+    else:
+        # Strip _sprint_num metadata — it's not a Jira field
+        for p in final_payloads["per_release"] + final_payloads["per_sprint"]:
+            p.pop("_sprint_num", None)
 
     # -- Step 10: Bulk create tickets ---------------------------------------
     try:

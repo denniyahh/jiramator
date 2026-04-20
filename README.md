@@ -121,12 +121,20 @@ sprints:
 
 ```yaml
 recurring_epics:
-  - key: bau                                    # internal ref key
-    summary: "{team_name} {pi_label} - BAU Work" # template string
+  - key: bau                                      # internal ref key
+    summary: "{team_name} {pi_label} - BAU Work"  # template string
+    fields:                                        # optional extra Jira fields for the epic itself
+      customfield_11623: {value: ["Internal Initiative"]}
+      customfield_10214: {value: "Business Feature"}
+      customfield_11560: {value: "M"}
+      customfield_10237: {value: "High"}
+      customfield_13209: {value: "Firm Strategic"}
 ```
 
 The `key` is used in ticket templates to link tickets to this epic via
-`$epic:<key>` syntax (see [Epic References](#epic-references)).
+`$epic:<key>` syntax (see [Epic References](#epic-references)). Epic `fields`
+work the same way as ticket `fields`: standard Jira fields are wrapped as
+needed, and `customfield_*` values are passed through as raw JSON.
 
 #### Ticket Template
 
@@ -235,7 +243,7 @@ pip install -e ".[dev]"
 python -m pytest -v
 ```
 
-198 tests covering config parsing, ticket building, Jira client, orchestration,
+206 tests covering config parsing, ticket building, Jira client, orchestration,
 and end-to-end integration with real config files.
 
 ## Future Enhancements
