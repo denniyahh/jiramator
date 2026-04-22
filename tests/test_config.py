@@ -84,15 +84,26 @@ class TestOrgConfigParsing:
         assert cfg.bulk_create.multi_value_delimiter == ","
 
     def test_bulk_create_block_is_parsed(self, org_config_data: dict) -> None:
+        org_config_data["custom_fields"] = {
+            "story_points": "customfield_10026",
+            "epic_link": "customfield_10014",
+            "code_complexity": "customfield_11901",
+            "risk_description": "customfield_11823",
+        }
         org_config_data["bulk_create"] = {
             "field_aliases": {
                 "Summary": "summary",
                 "Issue Type": "issuetype",
                 "API Impact": "api_impact",
+                "Code Complexity": "code_complexity",
+                "Risk Description": "risk_description",
             },
             "field_types": {
                 "issuetype": "name_object",
                 "api_impact": "multi_select",
+                "code_complexity": "single_select",
+                "risk_description": "adf_text",
+                "overall_risk_value": "number",
             },
             "defaults": {
                 "issuetype": "Risk",
@@ -103,7 +114,10 @@ class TestOrgConfigParsing:
         cfg = OrgConfig(**org_config_data)
         assert cfg.bulk_create.field_aliases["Summary"] == "summary"
         assert cfg.bulk_create.field_aliases["API Impact"] == "api_impact"
+        assert cfg.bulk_create.field_aliases["Code Complexity"] == "code_complexity"
         assert cfg.bulk_create.field_types["api_impact"] == "multi_select"
+        assert cfg.bulk_create.field_types["risk_description"] == "adf_text"
+        assert cfg.bulk_create.field_types["overall_risk_value"] == "number"
         assert cfg.bulk_create.defaults["issuetype"] == "Risk"
 
     def test_defaults_for_env_vars(self) -> None:

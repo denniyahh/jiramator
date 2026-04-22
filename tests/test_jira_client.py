@@ -269,6 +269,56 @@ class TestGetFields:
 # ---------------------------------------------------------------------------
 
 
+class TestFindIssueKeysBySummaries:
+    def test_returns_mapping_for_matching_summaries(self, client: JiraClient) -> None:
+        search_response = {
+            "issues": [
+                {"key": "CA-100", "fields": {"summary": "Risk A"}},
+                {"key": "CA-101", "fields": {"summary": "Risk B"}},
+            ]
+        }
+        client._session.get = MagicMock(
+            return_value=_mock_response(200, search_response)
+        )
+
+        result = client.find_issue_keys_by_summaries("CA", ["Risk A", "Risk B"])
+
+        assert result == {"Risk A": "CA-100", "Risk B": "CA-101"}
+
+    def test_empty_input_returns_empty_mapping(self, client: JiraClient) -> None:
+        assert client.find_issue_keys_by_summaries("CA", []) == {}
+
+    def test_error_raises(self, client: JiraClient) -> None:
+        client._session.get = MagicMock(
+            return_value=_mock_response(500, {"errorMessages": ["boom"]})
+        )
+        with pytest.raises(JiraApiError, match="searching for existing issues"):
+            client.find_issue_keys_by_summaries("CA", ["Risk A"])
+
+
+class TestFindUserAccountId:
+    def test_returns_exact_display_name_match(self, client: JiraClient) -> None:
+        users = [
+            {"accountId": "acct-1", "displayName": "Someone Else"},
+            {"accountId": "acct-2", "displayName": "Dennis Kim"},
+        ]
+        client._session.get = MagicMock(return_value=_mock_response(200, users))
+
+        assert client.find_user_account_id("Dennis Kim") == "acct-2"
+
+    def test_returns_none_when_no_users_match(self, client: JiraClient) -> None:
+        client._session.get = MagicMock(return_value=_mock_response(200, []))
+
+        assert client.find_user_account_id("Nobody") is None
+
+    def test_error_raises(self, client: JiraClient) -> None:
+        client._session.get = MagicMock(
+            return_value=_mock_response(500, {"errorMessages": ["boom"]})
+        )
+        with pytest.raises(JiraApiError, match="resolving Jira user"):
+            client.find_user_account_id("Dennis Kim")
+
+
 class TestGetFixVersions:
     def test_success(self, client: JiraClient) -> None:
         versions = [

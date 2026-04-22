@@ -70,6 +70,30 @@ class TestCoerceFieldValue:
             {"value": "Risk"},
         ]
 
+    def test_adf_text(self, bulk_create_config: BulkCreateConfig):
+        from jiramator.value_coercion import coerce_field_value
+
+        bulk_create_config.field_types["risk_description"] = "adf_text"
+
+        assert coerce_field_value("risk_description", "Java touches core code", bulk_create_config) == {
+            "type": "doc",
+            "version": 1,
+            "content": [
+                {
+                    "type": "paragraph",
+                    "content": [{"type": "text", "text": "Java touches core code"}],
+                }
+            ],
+        }
+
+    def test_number_from_string(self, bulk_create_config: BulkCreateConfig):
+        from jiramator.value_coercion import coerce_field_value
+
+        bulk_create_config.field_types["overall_risk_value"] = "number"
+
+        assert coerce_field_value("overall_risk_value", "10", bulk_create_config) == 10
+        assert coerce_field_value("overall_risk_value", "10.5", bulk_create_config) == 10.5
+
     def test_passthrough_for_untyped_field(self, bulk_create_config: BulkCreateConfig):
         from jiramator.value_coercion import coerce_field_value
 

@@ -1,6 +1,7 @@
 """Tests for spreadsheet row -> Jira payload import builder."""
-
 from __future__ import annotations
+
+from unittest.mock import MagicMock
 
 from jiramator.config import BulkCreateConfig, OrgConfig, TeamConfig
 
@@ -303,3 +304,73 @@ class TestBuildPreviewReport:
         assert report.auto_mapped_columns == {"Component/s": "components"}
         assert report.skipped_columns == ["Mystery Column"]
         assert report.row_results[0].warnings == ["Row 1: skipped unresolved column 'Mystery Column'"]
+
+
+class TestRunImport:
+    def test_continues_after_duplicate_and_api_failure(self):
+        from jiramator.importer import run_import
+        from jiramator.jira_client import JiraApiError
+
+        rows = [
+            {"Summary": "Risk A", "API Impact": "No"},
+            {"Summary": "Risk B", "API Impact": "No"},
+        ]
+        client = MagicMock()
+        client.find_issue_keys_by_summaries.return_value = {"Risk A": "CA-4999"}
+        client.create_issue.side_effect = [JiraApiError("boom")]
+
+        result = run_import(
+            rows,
+            org_config=_org_config(),
+            team_config=_team_config(),
+            jira_fields=[],
+            client=client,
+        )
+
+        assert result.created == []
+        assert result.skipped == [(1, "Risk A", "CA-4999")]
+        assert len(result.failed) == 1
+        assert result.failed[0][0] == 2
+        assert result.failed[0][1] == "Risk B"
+        assert "boom" in result.failed[0][2]
+
+    def test_resolves_reporter_to_account_id_before_create(self):
+        from jiramator.importer import run_import
+
+        rows = [{"Summary": "Risk A", "Reporter": "Dennis Kim"}]
+        jira_fields = [{"id": "reporter", "name": "Reporter"}]
+        client = MagicMock()
+        client.find_issue_keys_by_summaries.return_value = {}
+        client.find_user_account_id.return_value = "acct-123"
+        client.create_issue.return_value = "CA-5001"
+
+        result = run_import(
+            rows,
+            org_config=_org_config(),
+            team_config=_team_config(),
+            jira_fields=jira_fields,
+            client=client,
+        )
+
+        payload = client.create_issue.call_args.args[0]
+        assert payload["fields"]["reporter"] == {"accountId": "acct-123"}
+        assert result.created == [(1, "Risk A", "CA-5001")]
+
+    def test_dry_run_does_not_require_client(self):
+        from jiramator.importer import run_import
+
+        rows = [{"Summary": "Risk A", "API Impact": "No"}]
+
+        result = run_import(
+            rows,
+            org_config=_org_config(),
+            team_config=_team_config(),
+            jira_fields=[],
+            client=None,
+            dry_run=True,
+        )
+
+        assert result.created == []
+        assert result.skipped == []
+        assert result.failed == []
+        assert result.preview.total_rows == 1
