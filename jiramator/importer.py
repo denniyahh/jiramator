@@ -7,6 +7,7 @@ from typing import Any
 
 from jiramator.config import OrgConfig, TeamConfig
 from jiramator.field_resolver import ResolvedField, resolve_field_name
+from jiramator.jira_client import JiraApiError, JiraClient
 from jiramator.value_coercion import coerce_field_value, should_omit_value
 
 
@@ -34,6 +35,16 @@ class PreviewReport:
     auto_mapped_columns: dict[str, str]
     skipped_columns: list[str]
     row_results: list[RowBuildResult]
+
+
+@dataclass(frozen=True)
+class ImportRunResult:
+    """Outcome of executing or previewing an import run."""
+
+    preview: PreviewReport
+    created: list[tuple[int, str, str]]
+    skipped: list[tuple[int, str, str]]
+    failed: list[tuple[int, str, str]]
 
 
 _DIRECT_FIELDS = {"summary", "description"}
@@ -191,3 +202,123 @@ def build_preview_report(
         skipped_columns=sorted(skipped_columns),
         row_results=row_results,
     )
+
+
+def run_import(
+    rows: list[dict[str, Any]],
+    *,
+    org_config: OrgConfig,
+    team_config: TeamConfig,
+    jira_fields: list[dict[str, Any]] | None,
+    client: JiraClient | None,
+    dry_run: bool = False,
+) -> ImportRunResult:
+    """Execute a duplicate-safe row-by-row import, or just preview it in dry-run mode."""
+    preview = build_preview_report(
+        rows,
+        org_config=org_config,
+        team_config=team_config,
+        jira_fields=jira_fields,
+    )
+
+    if dry_run:
+        return ImportRunResult(preview=preview, created=[], skipped=[], failed=[])
+
+    if client is None:
+        raise ValueError("client is required for live imports")
+
+    successful_rows = [result for result in preview.row_results if result.success and result.payload]
+    seen_summaries = client.find_issue_keys_by_summaries(
+        team_config.project_key,
+        [result.summary for result in successful_rows],
+    )
+
+    created: list[tuple[int, str, str]] = []
+    skipped: list[tuple[int, str, str]] = []
+    failed: list[tuple[int, str, str]] = []
+
+    source_rows_by_number = {index: row for index, row in enumerate(rows, start=1)}
+
+    for result in preview.row_results:
+        if not result.success or result.payload is None:
+            failed.append((result.row_number, result.summary, result.error or "Unknown row error"))
+            continue
+
+        existing_key = seen_summaries.get(result.summary)
+        if existing_key:
+            skipped.append((result.row_number, result.summary, existing_key))
+            continue
+
+        payload = {
+            "fields": dict(result.payload["fields"]),
+        }
+        source_row = source_rows_by_number.get(result.row_number, {})
+        reporter_value = source_row.get("Reporter")
+        if isinstance(reporter_value, str) and reporter_value.strip():
+            account_id = client.find_user_account_id(reporter_value)
+            if account_id:
+                payload["fields"]["reporter"] = {"accountId": account_id}
+
+        try:
+            created_key = client.create_issue(payload)
+        except JiraApiError as exc:
+            failed.append((result.row_number, result.summary, str(exc)))
+            continue
+
+        seen_summaries[result.summary] = created_key
+        created.append((result.row_number, result.summary, created_key))
+
+    return ImportRunResult(
+        preview=preview,
+        created=created,
+        skipped=skipped,
+        failed=failed,
+    )
+
+
+def render_preview_report(report: PreviewReport, *, preview_rows: int = 5) -> str:
+    """Render a plain-text preview report for CLI output."""
+    lines = [
+        "Import preview",
+        f"total_rows={report.total_rows} successful={report.successful_rows} failed={report.failed_rows}",
+    ]
+
+    if report.mapped_columns:
+        mapped = ", ".join(f"{src}->{dst}" for src, dst in sorted(report.mapped_columns.items()))
+        lines.append(f"mapped_columns: {mapped}")
+    if report.auto_mapped_columns:
+        auto_mapped = ", ".join(
+            f"{src}->{dst}" for src, dst in sorted(report.auto_mapped_columns.items())
+        )
+        lines.append(f"auto_mapped_columns: {auto_mapped}")
+    if report.skipped_columns:
+        lines.append(f"skipped_columns: {', '.join(report.skipped_columns)}")
+
+    for row in report.row_results[:preview_rows]:
+        if row.success:
+            lines.append(f"Row {row.row_number}: {row.summary}")
+        else:
+            lines.append(f"Row {row.row_number}: ERROR {row.error}")
+        for warning in row.warnings:
+            lines.append(f"  warning: {warning}")
+
+    return "\n".join(lines)
+
+
+def render_import_execution_report(result: ImportRunResult) -> str:
+    """Render a plain-text execution summary for CLI output."""
+    lines = [
+        "Import execution summary",
+        f"created={len(result.created)} skipped={len(result.skipped)} failed={len(result.failed)}",
+    ]
+
+    for row_number, summary, issue_key in result.created:
+        lines.append(f"Row {row_number}: created {issue_key} for '{summary}'")
+    for row_number, summary, issue_key in result.skipped:
+        lines.append(
+            f"Row {row_number}: duplicate summary already exists as {issue_key} for '{summary}'"
+        )
+    for row_number, summary, error in result.failed:
+        lines.append(f"Row {row_number}: failed to create '{summary}' - {error}")
+
+    return "\n".join(lines)

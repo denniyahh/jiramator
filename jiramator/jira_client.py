@@ -185,6 +185,69 @@ class JiraClient:
             self._handle_error(response, "fetching Jira field metadata")
         return response.json()
 
+    def find_issue_keys_by_summaries(
+        self,
+        project_key: str,
+        summaries: list[str],
+    ) -> dict[str, str]:
+        """Return an exact-summary -> issue key mapping for existing issues in a project."""
+        unique_summaries = sorted({summary.strip() for summary in summaries if summary.strip()})
+        if not unique_summaries:
+            return {}
+
+        clauses = []
+        for summary in unique_summaries:
+            escaped = summary.replace("\\", "\\\\").replace('"', '\\"')
+            clauses.append(f'summary ~ "\\"{escaped}\\""')
+
+        jql = f'project = "{project_key}" AND (' + " OR ".join(clauses) + ")"
+        response = self._session.get(
+            self._url("/rest/api/3/search"),
+            params={
+                "jql": jql,
+                "fields": "summary",
+                "maxResults": len(unique_summaries),
+            },
+            timeout=_DEFAULT_TIMEOUT,
+        )
+        if not response.ok:
+            self._handle_error(response, "searching for existing issues by summary")
+
+        issues = response.json().get("issues", [])
+        requested = set(unique_summaries)
+        matches: dict[str, str] = {}
+        for issue in issues:
+            summary = issue.get("fields", {}).get("summary", "")
+            key = issue.get("key")
+            if summary in requested and key:
+                matches[summary] = key
+        return matches
+
+    def find_user_account_id(self, query: str) -> str | None:
+        """Resolve a Jira Cloud user query to an accountId using exact-match preference."""
+        cleaned = query.strip()
+        if not cleaned:
+            return None
+
+        response = self._session.get(
+            self._url("/rest/api/3/user/search"),
+            params={"query": cleaned},
+            timeout=_DEFAULT_TIMEOUT,
+        )
+        if not response.ok:
+            self._handle_error(response, "resolving Jira user")
+
+        users = response.json()
+        if not users:
+            return None
+
+        lowered = cleaned.casefold()
+        for user in users:
+            if str(user.get("displayName", "")).casefold() == lowered:
+                return user.get("accountId")
+
+        return users[0].get("accountId")
+
     def create_issue(self, payload: dict[str, Any]) -> str:
         """Create a single Jira issue.
 

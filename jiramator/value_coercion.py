@@ -39,6 +39,19 @@ def should_omit_value(value: Any) -> bool:
     return value is None or value == "" or value == []
 
 
+def _adf_paragraph(text: str) -> dict[str, Any]:
+    return {
+        "type": "doc",
+        "version": 1,
+        "content": [
+            {
+                "type": "paragraph",
+                "content": [{"type": "text", "text": text}],
+            }
+        ],
+    }
+
+
 def coerce_field_value(field_name: str, raw_value: Any, config: BulkCreateConfig) -> Any:
     """Coerce a raw logical value into the Jira REST payload shape for a field."""
     field_type = config.field_types.get(field_name, _BUILTIN_FIELD_TYPES.get(field_name))
@@ -60,5 +73,13 @@ def coerce_field_value(field_name: str, raw_value: Any, config: BulkCreateConfig
     if field_type == "multi_select":
         values = split_multi_value(raw_value, config)
         return [{"value": item} for item in values]
+
+    if field_type == "adf_text":
+        return _adf_paragraph(str(raw_value).strip())
+
+    if field_type == "number":
+        cleaned = str(raw_value).strip()
+        number = float(cleaned)
+        return int(number) if number.is_integer() else number
 
     return raw_value

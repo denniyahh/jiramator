@@ -13,6 +13,14 @@ import click
 from rich.console import Console
 
 from jiramator.config import load_org_config, load_team_config
+from jiramator.importer import (
+    build_preview_report,
+    render_import_execution_report,
+    render_preview_report,
+    run_import,
+)
+from jiramator.jira_client import JiraApiError, JiraClient
+from jiramator.spreadsheet import read_spreadsheet
 
 console = Console(stderr=True)
 
@@ -118,3 +126,113 @@ def plan(
     from jiramator.planner import run_plan  # noqa: E402 — deferred to avoid circular
 
     run_plan(org_config, team_config, dry_run=dry_run, console=console)
+
+
+@cli.command(name="import")
+@click.option(
+    "--org-config",
+    "-o",
+    "org_config_path",
+    type=click.Path(exists=True, path_type=Path),
+    default=Path("./configs/org/"),
+    show_default=True,
+    help="Path to org config file or directory containing one.",
+)
+@click.option(
+    "--team-config",
+    "-t",
+    "team_config_path",
+    type=click.Path(exists=True, path_type=Path),
+    required=True,
+    help="Path to team config YAML file.",
+)
+@click.option(
+    "--sheet-name",
+    type=str,
+    default=None,
+    help="Optional worksheet name for XLSX imports.",
+)
+@click.option(
+    "--dry-run",
+    "-n",
+    is_flag=True,
+    default=False,
+    help="Preview import payloads and exit without creating issues.",
+)
+@click.option(
+    "--max-rows",
+    type=int,
+    default=None,
+    help="Limit the number of spreadsheet rows read.",
+)
+@click.option(
+    "--preview-rows",
+    type=int,
+    default=5,
+    show_default=True,
+    help="Number of prepared rows to include in preview output.",
+)
+@click.argument("spreadsheet_path", type=click.Path(exists=True, path_type=Path))
+def import_command(
+    org_config_path: Path,
+    team_config_path: Path,
+    sheet_name: str | None,
+    dry_run: bool,
+    max_rows: int | None,
+    preview_rows: int,
+    spreadsheet_path: Path,
+) -> None:
+    """Import Jira issues from a CSV or XLSX spreadsheet."""
+    try:
+        resolved_org_path = _resolve_org_config_path(org_config_path)
+        org_config = load_org_config(resolved_org_path)
+    except (click.BadParameter, FileNotFoundError, ValueError) as exc:
+        console.print(f"[red bold]Org config error:[/] {exc}")
+        sys.exit(1)
+
+    try:
+        team_config = load_team_config(team_config_path)
+    except (FileNotFoundError, ValueError) as exc:
+        console.print(f"[red bold]Team config error:[/] {exc}")
+        sys.exit(1)
+
+    try:
+        rows = read_spreadsheet(
+            spreadsheet_path,
+            sheet_name=sheet_name,
+            max_rows=max_rows,
+        )
+    except (ValueError, KeyError) as exc:
+        console.print(f"[red bold]Spreadsheet error:[/] {exc}")
+        sys.exit(1)
+
+    if dry_run:
+        result = run_import(
+            rows,
+            org_config=org_config,
+            team_config=team_config,
+            jira_fields=None,
+            client=None,
+            dry_run=True,
+        )
+        console.print(render_preview_report(result.preview, preview_rows=preview_rows))
+        return
+
+    try:
+        client = JiraClient(org_config)
+        jira_fields = client.get_fields()
+        result = run_import(
+            rows,
+            org_config=org_config,
+            team_config=team_config,
+            jira_fields=jira_fields,
+            client=client,
+        )
+    except (ValueError, JiraApiError) as exc:
+        console.print(f"[red bold]Import error:[/] {exc}")
+        sys.exit(1)
+
+    console.print(render_preview_report(result.preview, preview_rows=preview_rows))
+    console.print(render_import_execution_report(result))
+    if result.failed:
+        sys.exit(1)
