@@ -64,6 +64,32 @@ The `plan` command walks you through an interactive flow:
 5. Asks for confirmation before creating anything
 6. Creates epics first, then bulk-creates remaining tickets
 
+## Planned: Ad-Hoc Bulk Issue Creation
+
+Jiramator does not yet ship ad-hoc bulk issue creation commands. Today, the only
+implemented CLI command is `plan`.
+
+The next major area of work is a unified bulk-create subsystem for ad-hoc issue
+creation. That subsystem will expose two user-facing workflows:
+
+- `create-issues` — YAML issue-spec input for structured, config-friendly bulk creation
+- `import` — CSV/XLSX spreadsheet input for business-owned, row-based bulk creation
+
+These are intentionally being designed as two adapters over one shared internal
+engine so field mapping, Jira payload coercion, previewing, and result reporting
+are not duplicated.
+
+Current planning artifacts:
+- `configs/teams/issue-spec.template.yaml` — draft YAML template, not yet wired to the CLI
+- `docs/create-issues-spec.md` — older standalone design spec, now superseded by the unified architecture plan
+- `docs/plans/2026-04-22-bulk-create-unified-architecture.md` — current architecture plan
+- `docs/plans/2026-04-22-bulk-create-workstreams.md` — current execution and branching plan
+
+Until that work lands, treat the YAML template/spec as design artifacts rather
+than shipped functionality.
+
+---
+
 ## Config Reference
 
 Jiramator uses a two-tier configuration model:
@@ -253,6 +279,8 @@ and end-to-end integration with real config files.
 - **Duplicate detection** — Query Jira for existing tickets matching summary +
   PI label before creating, skip duplicates automatically.
 - **`--yes` flag** — Skip all confirmation prompts for CI/scripted usage.
+- **Sub-task support** — Allow `type: Sub-task` with a `parent` field linking to
+  a parent issue (not just epic linking).
 
 ## License
 

@@ -13,8 +13,12 @@ jira_token_env: JIRA_TOKEN
 # Mapping of logical names to Jira custom field IDs.
 # Look these up via Jira admin or API: /rest/api/3/field
 custom_fields:
-  story_points: customfield_10026
-  epic_link: customfield_10014
+  story_points:         customfield_10026
+  epic_link:            customfield_10014
+  api_impact:           customfield_10273
+  product_horizontals:  customfield_12747
+  product_verticals:    customfield_12749
+  platform:             customfield_14823
 
 # PI sprint cadence
 sprints:
