@@ -7,6 +7,15 @@ from typing import Any
 from jiramator.config import BulkCreateConfig
 
 
+_BUILTIN_FIELD_TYPES = {
+    "issuetype": "name_object",
+    "priority": "name_object",
+    "fixVersions": "name_object_array",
+    "components": "name_object_array",
+    "labels": "labels",
+}
+
+
 def split_multi_value(value: Any, config: BulkCreateConfig) -> list[str]:
     """Split scalar/list inputs into a cleaned list of string values."""
     if value is None:
@@ -32,7 +41,7 @@ def should_omit_value(value: Any) -> bool:
 
 def coerce_field_value(field_name: str, raw_value: Any, config: BulkCreateConfig) -> Any:
     """Coerce a raw logical value into the Jira REST payload shape for a field."""
-    field_type = config.field_types.get(field_name)
+    field_type = config.field_types.get(field_name, _BUILTIN_FIELD_TYPES.get(field_name))
 
     if field_type == "name_object":
         return {"name": str(raw_value).strip()}

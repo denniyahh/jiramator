@@ -54,12 +54,19 @@ def _resolve_logical_to_jira_field(logical_name: str, org_config: OrgConfig) -> 
         return logical_name
 
 
-def _jira_field_lookup(source_name: str, jira_fields: list[dict[str, Any]]) -> tuple[str, str, str] | None:
+def _jira_field_lookup(
+    source_name: str,
+    jira_fields: list[dict[str, Any]],
+    org_config: OrgConfig,
+) -> tuple[str, str, str] | None:
+    custom_field_reverse = {jira_id: logical_name for logical_name, jira_id in org_config.custom_fields.items()}
+
     for field in jira_fields:
         if field.get("name") == source_name:
             field_id = field.get("id")
             if isinstance(field_id, str):
-                return source_name, field_id, "jira_exact"
+                logical_name = custom_field_reverse.get(field_id, source_name)
+                return logical_name, field_id, "jira_exact"
 
     normalized_source = normalize_field_name(source_name)
     for field in jira_fields:
@@ -67,7 +74,8 @@ def _jira_field_lookup(source_name: str, jira_fields: list[dict[str, Any]]) -> t
         field_id = field.get("id")
         if isinstance(field_name, str) and isinstance(field_id, str):
             if normalize_field_name(field_name) == normalized_source:
-                return normalized_source, field_id, "jira_normalized"
+                logical_name = custom_field_reverse.get(field_id, normalized_source)
+                return logical_name, field_id, "jira_normalized"
 
     return None
 
@@ -125,7 +133,7 @@ def resolve_field_name(
         )
 
     if jira_fields:
-        jira_match = _jira_field_lookup(source_name, jira_fields)
+        jira_match = _jira_field_lookup(source_name, jira_fields, org_config)
         if jira_match is not None:
             logical_name, jira_field, resolution_source = jira_match
             return ResolvedField(
