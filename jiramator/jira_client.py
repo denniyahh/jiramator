@@ -175,6 +175,16 @@ class JiraClient:
             self._handle_error(response, f"fetching project {project_key}")
         return response.json()
 
+    def get_fields(self) -> list[dict[str, Any]]:
+        """Fetch Jira field metadata for field name/id resolution."""
+        response = self._session.get(
+            self._url("/rest/api/3/field"),
+            timeout=_DEFAULT_TIMEOUT,
+        )
+        if not response.ok:
+            self._handle_error(response, "fetching Jira field metadata")
+        return response.json()
+
     def create_issue(self, payload: dict[str, Any]) -> str:
         """Create a single Jira issue.
 

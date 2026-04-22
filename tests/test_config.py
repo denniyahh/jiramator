@@ -75,6 +75,37 @@ class TestOrgConfigParsing:
         assert cfg.sprints.count == 6
         assert cfg.sprints.long_sprints == [6]
 
+    def test_bulk_create_defaults_to_empty_values(self, org_config_data: dict) -> None:
+        cfg = OrgConfig(**org_config_data)
+        assert cfg.bulk_create.field_aliases == {}
+        assert cfg.bulk_create.field_types == {}
+        assert cfg.bulk_create.defaults == {}
+        assert cfg.bulk_create.auto_lookup_unknown_fields is True
+        assert cfg.bulk_create.multi_value_delimiter == ","
+
+    def test_bulk_create_block_is_parsed(self, org_config_data: dict) -> None:
+        org_config_data["bulk_create"] = {
+            "field_aliases": {
+                "Summary": "summary",
+                "Issue Type": "issuetype",
+                "API Impact": "api_impact",
+            },
+            "field_types": {
+                "issuetype": "name_object",
+                "api_impact": "multi_select",
+            },
+            "defaults": {
+                "issuetype": "Risk",
+            },
+            "auto_lookup_unknown_fields": True,
+            "multi_value_delimiter": ",",
+        }
+        cfg = OrgConfig(**org_config_data)
+        assert cfg.bulk_create.field_aliases["Summary"] == "summary"
+        assert cfg.bulk_create.field_aliases["API Impact"] == "api_impact"
+        assert cfg.bulk_create.field_types["api_impact"] == "multi_select"
+        assert cfg.bulk_create.defaults["issuetype"] == "Risk"
+
     def test_defaults_for_env_vars(self) -> None:
         """If env var names are omitted, defaults kick in."""
         cfg = OrgConfig(
@@ -265,6 +296,17 @@ class TestLoadOrgConfig:
         assert str(cfg.jira_url) == "https://marketaxess.atlassian.net/"
         assert cfg.custom_fields["story_points"] == "customfield_10026"
         assert cfg.custom_fields["epic_link"] == "customfield_10014"
+        assert cfg.custom_fields["api_impact"] == "customfield_10273"
+        assert cfg.custom_fields["product_horizontals"] == "customfield_12747"
+        assert cfg.custom_fields["product_verticals"] == "customfield_12749"
+        assert cfg.custom_fields["platform"] == "customfield_14823"
+        assert cfg.bulk_create.field_aliases["Summary"] == "summary"
+        assert cfg.bulk_create.field_aliases["API Impact"] == "api_impact"
+        assert cfg.bulk_create.field_types["issuetype"] == "name_object"
+        assert cfg.bulk_create.field_types["api_impact"] == "multi_select"
+        assert cfg.bulk_create.defaults["issuetype"] == "Risk"
+        assert cfg.bulk_create.auto_lookup_unknown_fields is True
+        assert cfg.bulk_create.multi_value_delimiter == ","
         assert cfg.sprints.count == 6
         assert 6 in cfg.sprints.long_sprints
 

@@ -57,6 +57,31 @@ class SprintConfig(BaseModel):
         return v
 
 
+class BulkCreateConfig(BaseModel):
+    """Shared config for ad-hoc bulk issue creation inputs and coercion."""
+
+    field_aliases: dict[str, str] = Field(
+        default_factory=dict,
+        description="Maps source-facing field names/headers to logical field names",
+    )
+    field_types: dict[str, str] = Field(
+        default_factory=dict,
+        description="Maps logical or Jira field names to coercion types",
+    )
+    defaults: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Default field values applied by bulk-create workflows",
+    )
+    auto_lookup_unknown_fields: bool = Field(
+        default=True,
+        description="Whether to use Jira field metadata to resolve unknown fields",
+    )
+    multi_value_delimiter: str = Field(
+        default=",",
+        description="Delimiter for splitting multi-value fields from string inputs",
+    )
+
+
 class OrgConfig(BaseModel):
     """Organization-level configuration — Jira instance, custom fields, sprint structure."""
 
@@ -72,6 +97,10 @@ class OrgConfig(BaseModel):
     custom_fields: dict[str, str] = Field(
         default_factory=dict,
         description="Mapping of logical field names to Jira custom field IDs",
+    )
+    bulk_create: BulkCreateConfig = Field(
+        default_factory=BulkCreateConfig,
+        description="Shared config for ad-hoc bulk issue creation workflows",
     )
     sprints: SprintConfig = Field(description="Sprint cadence configuration")
 

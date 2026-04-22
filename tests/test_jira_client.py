@@ -243,6 +243,32 @@ class TestCreateIssuesBulk:
 # ---------------------------------------------------------------------------
 
 
+class TestGetFields:
+    def test_success(self, client: JiraClient) -> None:
+        fields = [
+            {"id": "summary", "name": "Summary"},
+            {"id": "customfield_10273", "name": "API Impact"},
+        ]
+        client._session.get = MagicMock(
+            return_value=_mock_response(200, fields)
+        )
+        result = client.get_fields()
+        assert result == fields
+        client._session.get.assert_called_once()
+
+    def test_error_raises(self, client: JiraClient) -> None:
+        client._session.get = MagicMock(
+            return_value=_mock_response(403, {"errorMessages": ["Forbidden"]})
+        )
+        with pytest.raises(JiraApiError, match="Permission denied"):
+            client.get_fields()
+
+
+# ---------------------------------------------------------------------------
+# get_fix_versions
+# ---------------------------------------------------------------------------
+
+
 class TestGetFixVersions:
     def test_success(self, client: JiraClient) -> None:
         versions = [

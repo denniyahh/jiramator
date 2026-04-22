@@ -20,6 +20,35 @@ custom_fields:
   product_verticals:    customfield_12749
   platform:             customfield_14823
 
+bulk_create:
+  field_aliases:
+    type: issuetype
+    fix_version: fixVersions
+    Summary: summary
+    Description: description
+    Issue Type: issuetype
+    Priority: priority
+    Labels: labels
+    Fix Versions: fixVersions
+    API Impact: api_impact
+    Product Horizontals: product_horizontals
+    Product Verticals: product_verticals
+    Platform: platform
+  field_types:
+    issuetype: name_object
+    priority: name_object
+    fixVersions: name_object_array
+    components: name_object_array
+    labels: labels
+    api_impact: multi_select
+    product_horizontals: single_select
+    product_verticals: multi_select
+    platform: multi_select
+  defaults:
+    issuetype: Risk
+  auto_lookup_unknown_fields: true
+  multi_value_delimiter: ","
+
 # PI sprint cadence
 sprints:
   count: 6
