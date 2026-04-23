@@ -9,8 +9,8 @@
 # command yet. Treat it as a design/working template until implementation lands.
 #
 # See also:
-# - docs/plans/2026-04-22-bulk-create-unified-architecture.md
-# - docs/plans/2026-04-22-bulk-create-workstreams.md
+# - .planning/specs/2026-04-22-bulk-create-unified-architecture.md
+# - .planning/specs/archive/2026-04-22-bulk-create-workstreams.md
 #
 # =============================================================================
 # HOW IT WORKS

@@ -1,5 +1,14 @@
 # Spreadsheet Import for Bulk Jira Creation Implementation Plan
 
+**Status**: Completed
+**Completed on**: 2026-04-23
+**Outcome**:
+- CSV/XLSX spreadsheet reader shipped
+- `jiramator import` shipped
+- duplicate-safe row-by-row live import shipped
+- reporter deferred in preview and resolved in live mode shipped
+- current operator guidance lives in `README.md`
+
 > For Hermes: Use subagent-driven-development skill to implement this plan task-by-task.
 
 Goal: Add a new Jiramator CLI workflow that imports Jira issues from .xlsx or .csv spreadsheets using org-level field mappings plus best-effort automatic lookup for unknown columns.
@@ -31,7 +40,7 @@ Non-goals:
 
 ## Proposed CLI UX
 
-Primary command:
+Primary command (historical proposal; actual shipped CLI uses a positional spreadsheet path rather than `--file`):
 
 ```bash
 jiramator import \
@@ -66,6 +75,8 @@ Deliberate omission:
 ## Org config changes
 
 Add import-oriented field mapping configuration to `configs/org/marketaxess.yaml` and `jiramator/config.py`.
+
+Note: the final shipped config section is `bulk_create`, not `importer`. This document is retained as a historical implementation plan, not the live schema reference.
 
 Proposed schema:
 

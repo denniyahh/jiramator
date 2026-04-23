@@ -3,8 +3,8 @@
 **Status**: Superseded by the unified bulk-create architecture plan
 **Created**: 2026-04-20
 **Superseded by**:
-- `docs/plans/2026-04-22-bulk-create-unified-architecture.md`
-- `docs/plans/2026-04-22-bulk-create-workstreams.md`
+- `.planning/specs/2026-04-22-bulk-create-unified-architecture.md`
+- `.planning/specs/archive/2026-04-22-bulk-create-workstreams.md`
 
 ## Important note
 
@@ -51,7 +51,7 @@ issue-spec.yaml → IssueSpec model (Pydantic-validated)
 
 ## Issue-Spec YAML Format
 
-Reference: `configs/teams/issue-spec.template.yaml`
+Reference: `.planning/specs/templates/issue-spec.template.yaml`
 
 ```yaml
 meta:
