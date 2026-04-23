@@ -48,6 +48,7 @@ class ImportRunResult:
 
 
 _DIRECT_FIELDS = {"summary", "description"}
+_DEFERRED_FIELDS = {"reporter"}
 
 
 def _build_resolved_value(
@@ -114,6 +115,9 @@ def build_row_payload(
 
         if resolved.jira_field is None:
             warnings.append(f"Row {row_number}: skipped unresolved column '{source_header}'")
+            continue
+
+        if resolved.jira_field in _DEFERRED_FIELDS:
             continue
 
         if resolved.jira_field == "assignee" and not isinstance(coerced, dict):

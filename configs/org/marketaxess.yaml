@@ -63,6 +63,7 @@ bulk_create:
     Database Impact: database_impact
     Requires Load Test: requires_load_test
     Production Sanity Test with Release?: production_sanity_test_with_release
+    Reporter: reporter
   field_types:
     issuetype: name_object
     priority: name_object

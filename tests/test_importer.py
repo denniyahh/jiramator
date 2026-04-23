@@ -27,6 +27,7 @@ def _org_config() -> OrgConfig:
                 "Platform": "platform",
                 "Fix Versions": "fixVersions",
                 "Labels": "labels",
+                "Reporter": "reporter",
             },
             field_types={
                 "issuetype": "name_object",
@@ -278,6 +279,33 @@ class TestBuildRowPayload:
         assert result.warnings == [
             "Row 10: skipped unsupported assignee value for column 'Assignee'; expected a Jira user object"
         ]
+
+    def test_reporter_is_deferred_without_warning(self):
+        from jiramator.importer import build_row_payload
+
+        row = {
+            "Summary": "Risk - deferred reporter",
+            "Reporter": "Dennis Kim",
+        }
+
+        result = build_row_payload(
+            row,
+            row_number=11,
+            org_config=_org_config(),
+            team_config=_team_config(),
+        )
+
+        assert result.success is True
+        assert result.payload == {
+            "fields": {
+                "project": {"key": "CA"},
+                "summary": "Risk - deferred reporter",
+                "issuetype": {"name": "Risk"},
+                "customfield_10273": [{"value": "No"}],
+            }
+        }
+        assert result.warnings == []
+        assert result.resolved_columns["Reporter"].jira_field == "reporter"
 
 
 class TestBuildPreviewReport:
