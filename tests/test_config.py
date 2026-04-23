@@ -316,6 +316,7 @@ class TestLoadOrgConfig:
         assert cfg.custom_fields["platform"] == "customfield_14823"
         assert cfg.bulk_create.field_aliases["Summary"] == "summary"
         assert cfg.bulk_create.field_aliases["API Impact"] == "api_impact"
+        assert cfg.bulk_create.field_aliases["Reporter"] == "reporter"
         assert cfg.bulk_create.field_types["issuetype"] == "name_object"
         assert cfg.bulk_create.field_types["api_impact"] == "multi_select"
         assert cfg.bulk_create.defaults["issuetype"] == "Risk"
