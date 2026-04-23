@@ -1,5 +1,13 @@
 # Unified Bulk Issue Creation Architecture Implementation Plan
 
+**Status**: Active architecture/design document
+**Last reviewed**: 2026-04-23
+**Current reality check**:
+- `plan` is shipped
+- `import` is shipped
+- YAML-based `create-issues` is not shipped
+- the current codebase does not yet implement the fully unified shared-engine architecture described here
+
 > For Hermes: Use subagent-driven-development skill to implement this plan task-by-task.
 
 Goal: Replace the current divergent ad hoc issue-creation ideas with one shared bulk-issue creation engine that supports multiple input adapters: YAML issue specs and spreadsheet imports.
@@ -42,20 +50,21 @@ So the correct design is:
 
 Implemented:
 - `plan` command
+- `import` command
 - org/team config loading
 - planner orchestration (`planner.py`)
 - Jira client for create issue, bulk create, fix versions, sprint lookup
 - template-based payload builder (`ticket_builder.py`)
+- spreadsheet import path with resolver/coercion/import orchestration
 
-Not implemented despite docs/specs:
+Not implemented despite older specs:
 - `create-issues` CLI command
-- issue-spec parsing/building modules
-- spreadsheet import command
+- issue-spec parsing/building modules for YAML ad-hoc creation
 
-Problematic drift:
-- README documents `create-issues` as if shipped
-- `configs/teams/issue-spec.template.yaml` exists, but no CLI supports it
-- `docs/create-issues-spec.md` is partly outdated and should not be treated as current truth
+Historical drift that has now been partially corrected:
+- README was previously stale and has since been updated
+- the issue-spec template has been moved under `.planning/specs/templates/` so it no longer masquerades as shipped runtime config
+- the legacy create-issues spec has been archived under `.planning/specs/archive/`
 
 ---
 
@@ -402,7 +411,7 @@ This gives you one engine and explicit behavior rather than separate orchestrati
 ### Priority 0: repo honesty
 
 1. Fix README so it does not claim `create-issues` is already shipped.
-2. Update `docs/create-issues-spec.md` header/status to make clear it is superseded by unified architecture.
+2. Update the archived legacy create-issues spec header/status to make clear it is superseded by unified architecture.
 
 This is not glamorous, but it matters. Right now docs are misleading.
 

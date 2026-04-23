@@ -1,10 +1,17 @@
 # Unified Bulk-Create Workstreams and Parallel Development Plan
 
+**Status**: Archived historical execution plan
+**Last reviewed**: 2026-04-23
+**Why archived**:
+- it captured a valid sequencing strategy at the time
+- large portions are now stale because `import` shipped directly and the repo state/branching advice is no longer current
+- keep this document for historical context, not as current execution guidance
+
 > For Hermes: Use subagent-driven-development skill to execute these workstreams with isolated subagents and explicit review gates.
 
 Goal: Break the unified bulk-create architecture into discrete, low-conflict workstreams so development can be parallelized safely where practical, without corrupting `main` or creating merge-conflict chaos.
 
-Architecture: This plan assumes the unified architecture in `docs/plans/2026-04-22-bulk-create-unified-architecture.md` is the source of truth. `plan` remains separate. Ad hoc creation is implemented through one shared engine with two adapters: YAML issue-spec and spreadsheet import.
+Architecture: This plan assumes the unified architecture in `.planning/specs/2026-04-22-bulk-create-unified-architecture.md` is the source of truth. `plan` remains separate. Ad hoc creation is implemented through one shared engine with two adapters: YAML issue-spec and spreadsheet import.
 
 Tech Stack: Python 3.11+, Click, Pydantic, requests, Rich, csv stdlib, openpyxl, pytest, git.
 

@@ -203,6 +203,9 @@ Still future work:
 - YAML-based ad-hoc bulk creation CLI
 - broader README examples and operational playbooks
 
+Planning/spec artifacts now live under `.planning/specs/`.
+See `.planning/specs/README.md` for the canonical index and document statuses.
+
 ---
 
 ## Config Reference
