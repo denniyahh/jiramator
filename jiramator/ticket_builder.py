@@ -16,6 +16,7 @@ from __future__ import annotations
 from typing import Any
 
 from jiramator.config import OrgConfig, TeamConfig, TicketTemplate, _EPIC_REF_RE, _TEMPLATE_VAR_RE
+from jiramator.yaml_loader import strip_line_markers as _strip_line_markers
 
 # ---------------------------------------------------------------------------
 # Field type wrapping
@@ -128,6 +129,11 @@ def _build_fields_payload(
         "project": {"key": project_key},
         "summary": resolve_value(summary, variables, epic_keys),
     }
+
+    # Defuse Pitfall 1: line-aware YAML loader injects __line__ on every
+    # parsed mapping; Pydantic dict[str, Any] fields pass it through. Strip
+    # before resolution so it never reaches Jira's REST API.
+    template_fields = _strip_line_markers(template_fields)
 
     for field_name, raw_value in template_fields.items():
         resolved = resolve_value(raw_value, variables, epic_keys)

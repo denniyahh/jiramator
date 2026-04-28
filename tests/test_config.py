@@ -293,13 +293,15 @@ class TestLoadOrgConfig:
         assert cfg.sprints.count == 6
 
     def test_nonexistent_file_raises(self) -> None:
-        with pytest.raises(FileNotFoundError, match="Org config not found"):
+        from jiramator.error_format import ConfigValidationError
+        with pytest.raises(ConfigValidationError, match="Org config not found"):
             load_org_config("/nonexistent/path.yaml")
 
     def test_non_mapping_yaml_raises(self, tmp_path: Path) -> None:
+        from jiramator.error_format import ConfigValidationError
         p = tmp_path / "bad.yaml"
         p.write_text("- just\n- a\n- list\n")
-        with pytest.raises(ValueError, match="YAML mapping"):
+        with pytest.raises(ConfigValidationError, match="YAML mapping"):
             load_org_config(p)
 
     def test_load_real_marketaxess_config(self) -> None:
@@ -729,13 +731,15 @@ class TestLoadTeamConfig:
         assert len(cfg.recurring_epics) == 2
 
     def test_nonexistent_file_raises(self) -> None:
-        with pytest.raises(FileNotFoundError, match="Team config not found"):
+        from jiramator.error_format import ConfigValidationError
+        with pytest.raises(ConfigValidationError, match="Team config not found"):
             load_team_config("/nonexistent/team.yaml")
 
     def test_non_mapping_yaml_raises(self, tmp_path: Path) -> None:
+        from jiramator.error_format import ConfigValidationError
         p = tmp_path / "bad.yaml"
         p.write_text("- a\n- b\n")
-        with pytest.raises(ValueError, match="YAML mapping"):
+        with pytest.raises(ConfigValidationError, match="YAML mapping"):
             load_team_config(p)
 
     def test_load_real_calcs_config(self) -> None:
