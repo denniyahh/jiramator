@@ -1,0 +1,111 @@
+"""Actionable config validation error format (FOUND-01).
+
+Renders errors as ``<file>:<line>: <field-path> — <reason>[ suggestion]``
+so a user staring at a 200-line YAML config can jump straight to the
+offending field.
+
+Public surface:
+    ConfigValidationError — frozen dataclass + Exception subclass raised by
+        ``jiramator.config.load_org_config`` and ``load_team_config``.
+    format_loc            — Pydantic ``loc`` tuple → ``a.b[0].c.d`` string.
+    did_you_mean          — difflib-backed PEP-657-style spelling suggestion.
+
+Note: ``frozen=True`` on a dataclass that subclasses ``Exception`` requires
+Python 3.11+. Project pyproject pins ``>=3.11`` so this is supported.
+"""
+
+from __future__ import annotations
+
+import difflib
+from dataclasses import dataclass
+from pathlib import Path
+
+
+@dataclass(frozen=True)
+class ConfigValidationError(Exception):
+    """Raised by config loaders when YAML/Pydantic validation fails.
+
+    Attributes:
+        file: Source file path (rendered relative to CWD when possible).
+        line: 1-indexed line of the offending mapping, or ``None`` when no
+            line is available (e.g. file-not-found, FileNotFoundError-like).
+        field_path: Dotted/bracketed path to the offending field
+            (e.g. ``per_release_tickets[0].fields.story_points``). Use
+            ``"<root>"`` when the error is at the document root,
+            ``"<file>"`` for I/O errors, ``"<yaml>"`` for parse errors.
+        reason: Human-readable failure reason (typically the Pydantic msg).
+        suggestion: Optional ``did_you_mean``-style hint, in parentheses,
+            ready to append (e.g. ``"(did you mean 'story_points'?)"``).
+    """
+
+    file: Path
+    line: int | None
+    field_path: str
+    reason: str
+    suggestion: str | None = None
+
+    def __str__(self) -> str:
+        rel = self._relative_to_cwd()
+        line_part = f":{self.line}" if self.line is not None else ""
+        suffix = f" {self.suggestion}" if self.suggestion else ""
+        return f"{rel}{line_part}: {self.field_path} — {self.reason}{suffix}"
+
+    def _relative_to_cwd(self) -> str:
+        """Render ``file`` relative to CWD if possible, else absolute."""
+        try:
+            return str(self.file.resolve().relative_to(Path.cwd()))
+        except ValueError:
+            return str(self.file)
+
+
+def format_loc(loc: tuple[int | str, ...]) -> str:
+    """Render a Pydantic ``loc`` tuple as a dotted/bracketed field path.
+
+    Examples::
+
+        format_loc(())                                            == ""
+        format_loc(("a",))                                        == "a"
+        format_loc(("a", 0, 1))                                   == "a[0][1]"
+        format_loc((0, "a"))                                      == "[0].a"
+        format_loc(("teams", 0, "tickets", 3, "fields", "x"))     == "teams[0].tickets[3].fields.x"
+    """
+    parts: list[str] = []
+    for step in loc:
+        if isinstance(step, int):
+            parts.append(f"[{step}]")
+        else:
+            # String step — separator depends on whether anything precedes it.
+            if not parts:
+                parts.append(str(step))
+            else:
+                parts.append(f".{step}")
+    return "".join(parts)
+
+
+def did_you_mean(
+    value: str,
+    candidates: list[str],
+    *,
+    n: int = 3,
+    cutoff: float = 0.7,
+) -> str | None:
+    """Return a PEP-657-style suggestion string, or ``None`` on no match.
+
+    Args:
+        value: The user-supplied (likely misspelled) name.
+        candidates: Known-good names to match against.
+        n: Max number of close matches to consider.
+        cutoff: ``difflib.get_close_matches`` similarity floor (0.0-1.0).
+
+    Returns:
+        - ``None`` when no candidate scores above ``cutoff``.
+        - ``"(did you mean 'X'?)"`` when exactly one candidate matches —
+          mirrors Python 3.11+ NameError phrasing.
+        - ``"(closest matches: X, Y, Z)"`` when ≥2 candidates match.
+    """
+    matches = difflib.get_close_matches(value, candidates, n=n, cutoff=cutoff)
+    if not matches:
+        return None
+    if len(matches) == 1:
+        return f"(did you mean '{matches[0]}'?)"
+    return f"(closest matches: {', '.join(matches)})"
