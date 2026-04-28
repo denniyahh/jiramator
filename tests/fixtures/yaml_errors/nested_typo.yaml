@@ -1,0 +1,10 @@
+# Triggers: unknown template variable {sprint_n} in per_release_tickets[0].summary
+# (sprint_num is the known var; sprint_n is a typo). Validated by
+# TicketTemplate.validate_summary_vars → ValueError → wrapped into
+# ConfigValidationError with did-you-mean for "sprint_num".
+project_key: CA
+team_name: Calcs
+per_release_tickets:
+  - summary: "Release {version} sprint {sprint_n} test"
+    fields:
+      issuetype: Task
