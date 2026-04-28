@@ -1,0 +1,104 @@
+"""Tests for the __line__ marker defuser in ticket_builder (FOUND-01).
+
+Plan: 01-01 Task 3, Pitfall 1.
+
+The line-aware YAML loader injects ``__line__: <int>`` on every parsed
+mapping. Pydantic models pass these through (``dict[str, Any]`` accepts
+unknown keys), so they would leak into Jira REST API payloads unless
+stripped. ``_strip_line_markers`` walks the structure recursively and
+removes the marker from every dict, returning a clean copy.
+"""
+
+from __future__ import annotations
+
+from jiramator.ticket_builder import _strip_line_markers
+from jiramator.yaml_loader import LINE_KEY
+
+
+def test_strip_top_level_marker():
+    """Test 1: __line__ at top level is removed."""
+    out = _strip_line_markers({"a": 1, LINE_KEY: 5})
+    assert out == {"a": 1}
+    assert LINE_KEY not in out
+
+
+def test_strip_nested_dict_marker():
+    """Test 2: __line__ in a nested dict is removed."""
+    out = _strip_line_markers({"outer": {"inner": 1, LINE_KEY: 7}, LINE_KEY: 3})
+    assert out == {"outer": {"inner": 1}}
+
+
+def test_strip_list_of_dicts_marker():
+    """Test 3: __line__ inside list-of-dicts is removed from each element."""
+    out = _strip_line_markers(
+        {
+            "items": [
+                {"a": 1, LINE_KEY: 2},
+                {"b": 2, LINE_KEY: 3},
+            ],
+            LINE_KEY: 1,
+        }
+    )
+    assert out == {"items": [{"a": 1}, {"b": 2}]}
+
+
+def test_no_marker_returns_equivalent_dict():
+    """Test 4: Input without markers passes through unchanged in value."""
+    src = {"a": 1, "b": [1, 2, 3], "c": {"d": "x"}}
+    out = _strip_line_markers(src)
+    assert out == src
+
+
+def test_does_not_mutate_input():
+    """Test 5: Input dict is not mutated (returns a copy)."""
+    src = {"a": 1, LINE_KEY: 5, "nested": {"x": 1, LINE_KEY: 6}}
+    snapshot = {"a": 1, LINE_KEY: 5, "nested": {"x": 1, LINE_KEY: 6}}
+    _ = _strip_line_markers(src)
+    assert src == snapshot
+
+
+def test_handles_scalar_values():
+    """Test 6: Scalar leaves (str/int/None/bool) pass through."""
+    out = _strip_line_markers(
+        {"s": "x", "i": 1, "n": None, "b": True, LINE_KEY: 9}
+    )
+    assert out == {"s": "x", "i": 1, "n": None, "b": True}
+
+
+def test_handles_list_of_scalars():
+    """Test 7: List of scalars passes through untouched."""
+    out = _strip_line_markers({"tags": ["a", "b", "c"], LINE_KEY: 1})
+    assert out == {"tags": ["a", "b", "c"]}
+
+
+def test_deeply_nested_mixed_structure():
+    """Test 8: Deep mix of dicts/lists with markers everywhere is fully cleaned."""
+    src = {
+        LINE_KEY: 1,
+        "components": [
+            {"name": "api", LINE_KEY: 3, "tags": ["x", "y"]},
+            {
+                "name": "ui",
+                LINE_KEY: 5,
+                "meta": {"owner": "team", LINE_KEY: 6},
+            },
+        ],
+        "config": {LINE_KEY: 8, "k": "v"},
+    }
+    out = _strip_line_markers(src)
+    assert out == {
+        "components": [
+            {"name": "api", "tags": ["x", "y"]},
+            {"name": "ui", "meta": {"owner": "team"}},
+        ],
+        "config": {"k": "v"},
+    }
+    # Verify marker is gone everywhere
+    def _no_marker(obj: object) -> bool:
+        if isinstance(obj, dict):
+            return LINE_KEY not in obj and all(_no_marker(v) for v in obj.values())
+        if isinstance(obj, list):
+            return all(_no_marker(v) for v in obj)
+        return True
+
+    assert _no_marker(out)

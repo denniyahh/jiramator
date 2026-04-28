@@ -111,3 +111,23 @@ def resolve_line(raw: object, loc: tuple[int | str, ...]) -> int | None:
     if isinstance(current, dict):
         return current.get(LINE_KEY, last_line)
     return last_line
+
+
+def strip_line_markers(obj: Any) -> Any:
+    """Return a deep copy of ``obj`` with every ``LINE_KEY`` entry removed.
+
+    The line-aware loader injects ``__line__`` on every parsed mapping. Pydantic
+    models with ``dict[str, Any]`` fields (e.g. ``TicketTemplate.fields``) pass
+    these through, which would leak the marker into Jira REST API payloads.
+    Call this on raw config dicts before model construction, and on the
+    ``fields`` dict before assembling Jira-bound payloads.
+
+    The input is not mutated. Non-dict / non-list leaves are returned as-is
+    (so the same scalar object is shared between input and output — fine,
+    scalars are immutable).
+    """
+    if isinstance(obj, dict):
+        return {k: strip_line_markers(v) for k, v in obj.items() if k != LINE_KEY}
+    if isinstance(obj, list):
+        return [strip_line_markers(v) for v in obj]
+    return obj

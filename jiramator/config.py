@@ -8,7 +8,10 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field, HttpUrl, field_validator, model_validator
+from pydantic import BaseModel, Field, HttpUrl, ValidationError, field_validator, model_validator
+
+from jiramator.error_format import ConfigValidationError, did_you_mean, format_loc
+from jiramator.yaml_loader import LINE_KEY, resolve_line, safe_load_with_lines, strip_line_markers
 
 # Known template variables that can appear in {brackets} in config strings.
 # The ticket builder will provide concrete values for these at runtime.
@@ -146,19 +149,116 @@ class OrgConfig(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+def _wrap_validation_error(
+    exc: ValidationError,
+    *,
+    file: Path,
+    tagged_raw: object,
+    known_template_vars: frozenset[str] = KNOWN_TEMPLATE_VARS,
+) -> ConfigValidationError:
+    """Convert the first error in a Pydantic ``ValidationError`` to a
+    ``ConfigValidationError`` enriched with line + did-you-mean."""
+    first = exc.errors()[0]
+    loc = first["loc"]
+    msg = first["msg"]
+    line = resolve_line(tagged_raw, loc)
+    field_path = format_loc(loc) or "<root>"
+
+    # Heuristic: if the failing message mentions an unknown template variable,
+    # mine the offender out and propose a close match from KNOWN_TEMPLATE_VARS.
+    suggestion: str | None = None
+    if "Unknown template variable" in msg:
+        # Format from _validate_template_vars:
+        #   "Unknown template variable(s) in <ctx>: <names>. Known variables: ..."
+        try:
+            after = msg.split("Unknown template variable(s) in", 1)[1]
+            names_part = after.split(":", 1)[1].split(".", 1)[0]
+            offenders = [n.strip() for n in names_part.split(",") if n.strip()]
+            if offenders:
+                # Suggest for the first offender — the typical case is one typo.
+                suggestion = did_you_mean(offenders[0], sorted(known_template_vars))
+        except (IndexError, ValueError):
+            suggestion = None
+
+    return ConfigValidationError(
+        file=file,
+        line=line,
+        field_path=field_path,
+        reason=msg,
+        suggestion=suggestion,
+    )
+
+
+def _load_yaml_with_lines(path: Path, kind: str) -> tuple[dict[str, Any], object]:
+    """Open ``path`` and parse it with the line-aware loader.
+
+    Returns ``(clean_dict_for_pydantic, tagged_raw_for_line_resolution)``.
+
+    Raises ``ConfigValidationError`` for: file-not-found, YAML parse errors,
+    and non-mapping document roots.
+    """
+    try:
+        with open(path) as f:
+            text = f.read()
+    except FileNotFoundError as exc:
+        raise ConfigValidationError(
+            file=path,
+            line=None,
+            field_path="<file>",
+            reason=f"{kind} config not found: {path}",
+        ) from exc
+    except OSError as exc:
+        raise ConfigValidationError(
+            file=path,
+            line=None,
+            field_path="<file>",
+            reason=f"Cannot read {kind} config: {exc}",
+        ) from exc
+
+    try:
+        tagged_raw = safe_load_with_lines(text)
+    except yaml.YAMLError as exc:
+        # Most YAMLError subclasses (ScannerError, ParserError, etc.) carry
+        # a problem_mark with a 0-indexed .line attribute.
+        line: int | None = None
+        problem_mark = getattr(exc, "problem_mark", None)
+        if problem_mark is not None:
+            line = problem_mark.line + 1
+        raise ConfigValidationError(
+            file=path,
+            line=line,
+            field_path="<yaml>",
+            reason=f"YAML parse error: {exc.__class__.__name__}",
+        ) from exc
+
+    if not isinstance(tagged_raw, dict):
+        raise ConfigValidationError(
+            file=path,
+            line=1,
+            field_path="<root>",
+            reason=(
+                f"{kind} config must be a YAML mapping, "
+                f"got {type(tagged_raw).__name__}"
+            ),
+        )
+
+    clean = strip_line_markers(tagged_raw)
+    return clean, tagged_raw
+
+
 def load_org_config(path: str | Path) -> OrgConfig:
-    """Load and validate an org config from a YAML file."""
+    """Load and validate an org config from a YAML file.
+
+    Raises ``ConfigValidationError`` for missing files, parse errors,
+    non-mapping roots, and Pydantic validation failures (with file:line
+    pinpointing and did-you-mean suggestions where applicable).
+    """
     path = Path(path)
-    if not path.exists():
-        raise FileNotFoundError(f"Org config not found: {path}")
-
-    with open(path) as f:
-        raw = yaml.safe_load(f)
-
-    if not isinstance(raw, dict):
-        raise ValueError(f"Org config must be a YAML mapping, got {type(raw).__name__}")
-
-    return OrgConfig(**raw)
+    clean, tagged = _load_yaml_with_lines(path, kind="Org")
+    try:
+        return OrgConfig(**clean)
+    except ValidationError as exc:
+        raise _wrap_validation_error(exc, file=path, tagged_raw=tagged) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -368,15 +468,15 @@ class TeamConfig(BaseModel):
 
 
 def load_team_config(path: str | Path) -> TeamConfig:
-    """Load and validate a team config from a YAML file."""
+    """Load and validate a team config from a YAML file.
+
+    Raises ``ConfigValidationError`` for missing files, parse errors,
+    non-mapping roots, and Pydantic validation failures (with file:line
+    pinpointing and did-you-mean suggestions for typo'd template vars).
+    """
     path = Path(path)
-    if not path.exists():
-        raise FileNotFoundError(f"Team config not found: {path}")
-
-    with open(path) as f:
-        raw = yaml.safe_load(f)
-
-    if not isinstance(raw, dict):
-        raise ValueError(f"Team config must be a YAML mapping, got {type(raw).__name__}")
-
-    return TeamConfig(**raw)
+    clean, tagged = _load_yaml_with_lines(path, kind="Team")
+    try:
+        return TeamConfig(**clean)
+    except ValidationError as exc:
+        raise _wrap_validation_error(exc, file=path, tagged_raw=tagged) from exc
