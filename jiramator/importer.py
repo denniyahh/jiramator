@@ -243,6 +243,14 @@ def run_import(
 
     source_rows_by_number = {index: row for index, row in enumerate(rows, start=1)}
 
+    # Discover which source header(s) resolved to reporter, so we can look up
+    # the value by the actual header name rather than hardcoding "Reporter".
+    reporter_headers: set[str] = set()
+    for row_result in preview.row_results:
+        for source_header, resolved in row_result.resolved_columns.items():
+            if resolved.jira_field == "reporter":
+                reporter_headers.add(source_header)
+
     for result in preview.row_results:
         if not result.success or result.payload is None:
             failed.append((result.row_number, result.summary, result.error or "Unknown row error"))
@@ -257,11 +265,13 @@ def run_import(
             "fields": dict(result.payload["fields"]),
         }
         source_row = source_rows_by_number.get(result.row_number, {})
-        reporter_value = source_row.get("Reporter")
-        if isinstance(reporter_value, str) and reporter_value.strip():
-            account_id = client.find_user_account_id(reporter_value)
-            if account_id:
-                payload["fields"]["reporter"] = {"accountId": account_id}
+        for header in reporter_headers:
+            reporter_value = source_row.get(header)
+            if isinstance(reporter_value, str) and reporter_value.strip():
+                account_id = client.find_user_account_id(reporter_value)
+                if account_id:
+                    payload["fields"]["reporter"] = {"accountId": account_id}
+                break
 
         try:
             created_key = client.create_issue(payload)

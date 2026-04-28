@@ -28,8 +28,8 @@ from jiramator.config import OrgConfig, TeamConfig
 from jiramator.jira_client import JiraApiError, JiraClient
 from jiramator.ticket_builder import build_all
 
-# Sprint field ID in Jira (customfield_10021 accepts sprint ID as integer)
-_SPRINT_FIELD = "customfield_10021"
+# Default sprint field ID in Jira (overridable via org_config.custom_fields["sprint_field"])
+_DEFAULT_SPRINT_FIELD = "customfield_10021"
 
 
 # ---------------------------------------------------------------------------
@@ -237,6 +237,7 @@ def _display_preview(
 
 def _resolve_sprint_ids(
     client: JiraClient,
+    org_config: OrgConfig,
     team_config: TeamConfig,
     pi_num: str,
     payloads: list[dict[str, Any]],
@@ -245,11 +246,14 @@ def _resolve_sprint_ids(
     """Resolve _sprint_num annotations to real Jira sprint IDs.
 
     Fetches sprints from the configured board, matches them against the
-    sprint_name_template, and injects ``customfield_10021`` into each payload.
+    sprint_name_template, and injects the sprint custom field into each payload.
+    The sprint field ID is read from ``org_config.custom_fields["sprint_field"]``,
+    falling back to ``customfield_10021`` if not configured.
     Mutates payloads in place. Strips ``_sprint_num`` after resolution.
 
     Args:
         client: Authenticated Jira client.
+        org_config: Organization config (for sprint field ID lookup).
         team_config: Team config with board_id and sprint_name_template.
         pi_num: The PI number (e.g. "28").
         payloads: List of ticket payloads (may contain ``_sprint_num``).
@@ -289,10 +293,11 @@ def _resolve_sprint_ids(
         )
 
     # Inject sprint IDs into payloads
+    sprint_field = org_config.custom_fields.get("sprint_field", _DEFAULT_SPRINT_FIELD)
     for payload in payloads:
         sprint_num = payload.pop("_sprint_num", None)
         if sprint_num and sprint_num in sprint_num_to_id:
-            payload["fields"][_SPRINT_FIELD] = sprint_num_to_id[sprint_num]
+            payload["fields"][sprint_field] = sprint_num_to_id[sprint_num]
 
 
 # ---------------------------------------------------------------------------
@@ -504,7 +509,7 @@ def run_plan(
         console.print("\n[bold]Resolving sprints...[/]\n")
         all_ticketable = final_payloads["per_release"] + final_payloads["per_sprint"]
         try:
-            _resolve_sprint_ids(client, team_config, pi_num, all_ticketable, console)
+            _resolve_sprint_ids(client, org_config, team_config, pi_num, all_ticketable, console)
         except JiraApiError as exc:
             console.print(f"\n[yellow]⚠ Sprint resolution failed:[/] {exc}")
             console.print("  Tickets will be created without sprint assignment.")
