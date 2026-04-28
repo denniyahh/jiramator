@@ -384,6 +384,32 @@ class TestRunImport:
         assert payload["fields"]["reporter"] == {"accountId": "acct-123"}
         assert result.created == [(1, "Risk A", "CA-5001")]
 
+    def test_resolves_reporter_via_alias_with_nonstandard_header(self):
+        """Reporter lookup should work even when the spreadsheet header differs from 'Reporter'."""
+        from jiramator.importer import run_import
+
+        org = _org_config()
+        # Add an alias that maps a non-standard header to reporter
+        org.bulk_create.field_aliases["Report Author"] = "reporter"
+
+        rows = [{"Summary": "Risk B", "Report Author": "Jane Doe"}]
+        client = MagicMock()
+        client.find_issue_keys_by_summaries.return_value = {}
+        client.find_user_account_id.return_value = "acct-456"
+        client.create_issue.return_value = "CA-5002"
+
+        result = run_import(
+            rows,
+            org_config=org,
+            team_config=_team_config(),
+            jira_fields=[],
+            client=client,
+        )
+
+        payload = client.create_issue.call_args.args[0]
+        assert payload["fields"]["reporter"] == {"accountId": "acct-456"}
+        assert result.created == [(1, "Risk B", "CA-5002")]
+
     def test_dry_run_does_not_require_client(self):
         from jiramator.importer import run_import
 
