@@ -7,6 +7,8 @@ from pathlib import Path
 
 import openpyxl
 
+from jiramator.encoding import detect_encoding
+
 
 def _normalize_headers(headers: list[object]) -> list[str]:
     return [str(header).strip() for header in headers]
@@ -18,8 +20,21 @@ def _coerce_cell(value: object) -> str:
     return str(value)
 
 
-def _read_csv(path: Path, *, max_rows: int | None = None) -> list[dict[str, str]]:
-    with path.open(newline="", encoding="utf-8") as handle:
+def _read_csv(
+    path: Path,
+    *,
+    max_rows: int | None = None,
+    encoding_override: str | None = None,
+) -> list[dict[str, str]]:
+    enc = detect_encoding(path, override=encoding_override)
+    if enc != "utf-8":
+        # DC-1: stdout stays clean; user-facing notes go to stderr. Use
+        # rich.Console here for consistency with the rest of the CLI's
+        # styled output, though the message itself is plain text.
+        from rich.console import Console
+        Console(stderr=True).print(f"Read {path} as {enc}")
+
+    with path.open(newline="", encoding=enc) as handle:
         reader = csv.DictReader(handle)
         if reader.fieldnames is None:
             return []
@@ -74,13 +89,24 @@ def read_spreadsheet(
     *,
     sheet_name: str | None = None,
     max_rows: int | None = None,
+    encoding_override: str | None = None,
 ) -> list[dict[str, str]]:
-    """Read a CSV or XLSX spreadsheet into a list of row dicts."""
+    """Read a CSV or XLSX spreadsheet into a list of row dicts.
+
+    Args:
+        path: CSV or XLSX file path.
+        sheet_name: For XLSX only — sheet name (defaults to first sheet).
+        max_rows: Optional row limit.
+        encoding_override: For CSV only — bypass encoding detection and
+            use this codec verbatim. Ignored for XLSX (binary reader).
+    """
     path = Path(path)
     suffix = path.suffix.lower()
 
     if suffix == ".csv":
-        return _read_csv(path, max_rows=max_rows)
+        return _read_csv(
+            path, max_rows=max_rows, encoding_override=encoding_override,
+        )
     if suffix == ".xlsx":
         return _read_xlsx(path, sheet_name=sheet_name, max_rows=max_rows)
     if suffix == ".xls":
