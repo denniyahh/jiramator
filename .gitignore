@@ -37,3 +37,6 @@ Thumbs.db
 
 # GSD planning docs (local-only)
 .planning/
+
+# Run reports (FOUND-02)
+.jiramator/
