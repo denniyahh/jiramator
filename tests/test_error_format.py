@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from jiramator.error_format import (
+    ConfigConflictWarning,
     ConfigValidationError,
     did_you_mean,
     format_loc,
@@ -188,6 +189,100 @@ def test_did_you_mean_multi_match_phrasing():
     # At least two of the candidates should appear when multi-match fires
     assert "story_points" in result
     assert "story_point" in result
+
+
+# ---------------------------------------------------------------------------
+# ConfigConflictWarning (Phase 02-01)
+# ---------------------------------------------------------------------------
+
+
+class TestConfigConflictWarning:
+    def test_w1_intra_file_team_defaults_format(self, tmp_path, monkeypatch):
+        """W1: full string format for the team-defaults-vs-template case."""
+        monkeypatch.chdir(tmp_path)
+        target = tmp_path / "t.yaml"
+        target.write_text("x")
+        w = ConfigConflictWarning(
+            later_file=target,
+            later_line=12,
+            earlier_file=target,
+            earlier_line=3,
+            field_path="priority",
+            earlier_layer="team defaults",
+        )
+        assert str(w) == (
+            "t.yaml:12: priority — locked by team defaults "
+            "(t.yaml:3); later value ignored."
+        )
+
+    def test_w2_omits_line_when_none(self, tmp_path, monkeypatch):
+        """W2: when later_line / earlier_line is None, the :line segment is omitted."""
+        monkeypatch.chdir(tmp_path)
+        target = tmp_path / "t.yaml"
+        target.write_text("x")
+        w = ConfigConflictWarning(
+            later_file=target,
+            later_line=None,
+            earlier_file=target,
+            earlier_line=None,
+            field_path="priority",
+            earlier_layer="team defaults",
+        )
+        rendered = str(w)
+        # No `:NN:` line segment after either filename
+        assert "t.yaml: priority" in rendered
+        assert "(t.yaml);" in rendered
+
+    def test_w3_relative_to_cwd_when_possible(self, tmp_path, monkeypatch):
+        """W3: paths render relative to CWD when possible."""
+        monkeypatch.chdir(tmp_path)
+        nested = tmp_path / "configs" / "teams" / "calcs.yaml"
+        nested.parent.mkdir(parents=True)
+        nested.write_text("x")
+        w = ConfigConflictWarning(
+            later_file=nested,
+            later_line=10,
+            earlier_file=nested,
+            earlier_line=2,
+            field_path="priority",
+            earlier_layer="team defaults",
+        )
+        rendered = str(w)
+        assert rendered.startswith("configs/teams/calcs.yaml:10:")
+
+    def test_w4_frozen(self, tmp_path):
+        """W4: ConfigConflictWarning is frozen — mutating fields raises."""
+        target = tmp_path / "t.yaml"
+        target.write_text("x")
+        w = ConfigConflictWarning(
+            later_file=target,
+            later_line=1,
+            earlier_file=target,
+            earlier_line=2,
+            field_path="x",
+            earlier_layer="team defaults",
+        )
+        with pytest.raises(Exception):
+            w.field_path = "y"  # type: ignore[misc]
+
+    def test_w5_not_an_exception_subclass(self, tmp_path):
+        """W5: ConfigConflictWarning is NOT an Exception subclass."""
+        target = tmp_path / "t.yaml"
+        target.write_text("x")
+        w = ConfigConflictWarning(
+            later_file=target,
+            later_line=1,
+            earlier_file=target,
+            earlier_line=2,
+            field_path="x",
+            earlier_layer="team defaults",
+        )
+        assert not isinstance(w, Exception)
+
+
+# ---------------------------------------------------------------------------
+# did_you_mean — result shape
+# ---------------------------------------------------------------------------
 
 
 def test_did_you_mean_result_shape_brackets():
