@@ -499,16 +499,56 @@ class TeamConfig(BaseModel):
         return [e.key for e in self.recurring_epics] + list(self.existing_epics.keys())
 
 
-def load_team_config(path: str | Path) -> TeamConfig:
+def load_team_config(
+    path: str | Path,
+    *,
+    console: Any = None,
+) -> TeamConfig:
     """Load and validate a team config from a YAML file.
 
-    Raises ``ConfigValidationError`` for missing files, parse errors,
-    non-mapping roots, and Pydantic validation failures (with file:line
-    pinpointing and did-you-mean suggestions for typo'd template vars).
+    After Pydantic validation, applies team-internal ``defaults.fields``
+    to every template's ``fields`` per Phase 2 layered-merge rules
+    (earlier wins on same-key conflicts; lists concat-deduplicate;
+    warnings to stderr).
+
+    Args:
+        path:    Path to the team-config YAML file.
+        console: Optional ``rich.console.Console`` to receive merge
+                 conflict warnings. When ``None`` (the default), a
+                 ``Console(stderr=True)`` is instantiated by the loader.
+                 The parameter exists primarily for testability and
+                 future CLI plumbing; pass ``None`` for normal use.
+
+    Raises:
+        ConfigValidationError: For missing files, parse errors,
+            non-mapping roots, and Pydantic validation failures (with
+            file:line pinpointing and did-you-mean suggestions for
+            typo'd template variables).
     """
     path = Path(path)
     clean, tagged = _load_yaml_with_lines(path, kind="Team")
     try:
-        return TeamConfig(**clean)
+        model = TeamConfig(**clean)
     except ValidationError as exc:
         raise _wrap_validation_error(exc, file=path, tagged_raw=tagged) from exc
+
+    # Phase 02-01: apply team-internal defaults into every template's fields.
+    # Local import keeps the import graph trivially obvious (config_merge
+    # already imports from yaml_loader + error_format; config.py importing
+    # from config_merge is safe but the deferred import avoids any future
+    # circular-import surprise).
+    from jiramator.config_merge import merge_team_defaults_into_templates
+
+    warnings = merge_team_defaults_into_templates(
+        team_model=model,
+        team_tagged_raw=tagged,
+        team_file=path,
+    )
+    if warnings:
+        if console is None:
+            from rich.console import Console
+            console = Console(stderr=True)
+        for w in warnings:
+            console.print(str(w), highlight=False, markup=False)
+
+    return model
