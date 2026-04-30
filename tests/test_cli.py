@@ -402,3 +402,302 @@ class TestPlanCommandErrors:
         assert result.exit_code == 1
         assert "Resume report incompatible" in result.stderr
         assert "kwargs" not in stub_run_plan
+
+
+# ---------------------------------------------------------------------------
+# Task 2 — import command flag wiring (CI1-CI6)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def stub_run_import(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    """Replace ``jiramator.cli.run_import`` with a recorder.
+
+    Also stubs the renderers so the cli's tail (which calls ``render_preview_report``
+    and ``render_import_execution_report``) doesn't trip over the fake result.
+    """
+    captured: dict[str, Any] = {}
+
+    class _FakePreview:
+        row_results: list = []
+
+    class _FakeResult:
+        preview = _FakePreview()
+        created: list = []
+        skipped: list = []
+        failed: list = []
+
+    def _recorder(*args: Any, **kwargs: Any) -> Any:
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return _FakeResult()
+
+    monkeypatch.setattr("jiramator.cli.run_import", _recorder)
+    monkeypatch.setattr("jiramator.cli.render_preview_report", lambda *a, **kw: "")
+    monkeypatch.setattr(
+        "jiramator.cli.render_import_execution_report", lambda *a, **kw: ""
+    )
+    return captured
+
+
+@pytest.fixture
+def stub_read_spreadsheet(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    """Replace ``jiramator.cli.read_spreadsheet`` with a recorder."""
+    captured: dict[str, Any] = {}
+
+    def _recorder(path: Path, **kwargs: Any) -> list[dict[str, str]]:
+        captured["path"] = path
+        captured["kwargs"] = kwargs
+        return [{"Summary": "Row A"}]
+
+    monkeypatch.setattr("jiramator.cli.read_spreadsheet", _recorder)
+    return captured
+
+
+@pytest.fixture
+def stub_jira_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Replace ``jiramator.cli.JiraClient`` with a no-op double."""
+
+    class _FakeClient:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def get_fields(self) -> list[dict[str, Any]]:
+            return []
+
+    monkeypatch.setattr("jiramator.cli.JiraClient", _FakeClient)
+
+
+def _import_args(
+    org_config_path: Path,
+    team_config_path: Path,
+    spreadsheet: Path,
+    *extra: str,
+) -> list[str]:
+    return [
+        "import",
+        "--org-config",
+        str(org_config_path),
+        "--team-config",
+        str(team_config_path),
+        *extra,
+        str(spreadsheet),
+    ]
+
+
+class TestImportCommandFlags:
+    def test_CI1_explicit_encoding_threaded_through(
+        self,
+        runner: CliRunner,
+        monkeypatch: pytest.MonkeyPatch,
+        stub_read_spreadsheet: dict[str, Any],
+        stub_jira_client: None,
+        stub_run_import: dict[str, Any],
+        org_config_path: Path,
+        team_config_path: Path,
+        tmp_path: Path,
+    ) -> None:
+        sheet = tmp_path / "input.csv"
+        sheet.write_text("Summary\nRow A\n", encoding="utf-8")
+
+        result = runner.invoke(
+            cli,
+            _import_args(
+                org_config_path, team_config_path, sheet, "--encoding", "cp1252"
+            ),
+        )
+
+        assert result.exit_code == 0, result.stderr
+        assert stub_read_spreadsheet["kwargs"]["encoding_override"] == "cp1252"
+
+    def test_CI2_no_encoding_flag_passes_none(
+        self,
+        runner: CliRunner,
+        stub_read_spreadsheet: dict[str, Any],
+        stub_jira_client: None,
+        stub_run_import: dict[str, Any],
+        org_config_path: Path,
+        team_config_path: Path,
+        tmp_path: Path,
+    ) -> None:
+        sheet = tmp_path / "input.csv"
+        sheet.write_text("Summary\nRow A\n", encoding="utf-8")
+
+        result = runner.invoke(
+            cli, _import_args(org_config_path, team_config_path, sheet)
+        )
+
+        assert result.exit_code == 0, result.stderr
+        assert stub_read_spreadsheet["kwargs"]["encoding_override"] is None
+
+    def test_CI3_explicit_report_path_threaded_through(
+        self,
+        runner: CliRunner,
+        stub_read_spreadsheet: dict[str, Any],
+        stub_jira_client: None,
+        stub_run_import: dict[str, Any],
+        org_config_path: Path,
+        team_config_path: Path,
+        tmp_path: Path,
+    ) -> None:
+        sheet = tmp_path / "input.csv"
+        sheet.write_text("Summary\nRow A\n", encoding="utf-8")
+        custom = tmp_path / "custom" / "i.json"
+
+        result = runner.invoke(
+            cli,
+            _import_args(
+                org_config_path, team_config_path, sheet, "--report", str(custom)
+            ),
+        )
+
+        assert result.exit_code == 0, result.stderr
+        assert stub_run_import["kwargs"]["report_path"] == custom
+        # Report should have been written by cli at the end of the run.
+        assert custom.exists()
+
+    def test_CI4_resume_auto_uses_find_resumable(
+        self,
+        runner: CliRunner,
+        monkeypatch: pytest.MonkeyPatch,
+        stub_read_spreadsheet: dict[str, Any],
+        stub_jira_client: None,
+        stub_run_import: dict[str, Any],
+        org_config_path: Path,
+        team_config_path: Path,
+        tmp_path: Path,
+    ) -> None:
+        # Build an envelope whose hash matches what cli.import_command will
+        # compute (so the drift check passes). compute_resolved_hash for
+        # import uses (org, team, None, []).
+        from jiramator.config import load_org_config, load_team_config
+        from jiramator.run_report import compute_resolved_hash
+
+        org_config = load_org_config(org_config_path)
+        team_config = load_team_config(team_config_path)
+        current_hash = compute_resolved_hash(org_config, team_config, None, [])
+
+        prior = tmp_path / "prior.json"
+        report = RunReport(
+            command=["jiramator", "import"],
+            started_at="2026-04-29T10:00:00+00:00",
+            team_config_path=str(team_config_path.resolve()),
+            org_config_path=str(org_config_path.resolve()),
+            team_name=team_config.team_name,
+            pi_label=None,
+            versions=[],
+            resolved_config_hash=current_hash,
+            status="failed",
+        )
+        prior.write_text(json.dumps(report.to_envelope()), encoding="utf-8")
+
+        monkeypatch.setattr("jiramator.cli.find_resumable", lambda p: prior)
+
+        sheet = tmp_path / "input.csv"
+        sheet.write_text("Summary\nRow A\n", encoding="utf-8")
+
+        # Click consumes the positional aggressively when --resume (no value)
+        # appears immediately before it; place --resume AFTER the positional
+        # to use flag_value="auto" cleanly.
+        result = runner.invoke(
+            cli,
+            [
+                "import",
+                "--org-config",
+                str(org_config_path),
+                "--team-config",
+                str(team_config_path),
+                str(sheet),
+                "--resume",
+            ],
+        )
+
+        assert result.exit_code == 0, result.stderr
+        prior_report = stub_run_import["kwargs"]["prior_report"]
+        assert isinstance(prior_report, RunReport)
+        assert prior_report.team_name == team_config.team_name
+
+    def test_CI5_resume_explicit_path_skips_find_resumable(
+        self,
+        runner: CliRunner,
+        monkeypatch: pytest.MonkeyPatch,
+        stub_read_spreadsheet: dict[str, Any],
+        stub_jira_client: None,
+        stub_run_import: dict[str, Any],
+        org_config_path: Path,
+        team_config_path: Path,
+        tmp_path: Path,
+    ) -> None:
+        from jiramator.config import load_org_config, load_team_config
+        from jiramator.run_report import compute_resolved_hash
+
+        org_config = load_org_config(org_config_path)
+        team_config = load_team_config(team_config_path)
+        current_hash = compute_resolved_hash(org_config, team_config, None, [])
+
+        prior = tmp_path / "explicit.json"
+        report = RunReport(
+            command=["jiramator", "import"],
+            started_at="2026-04-29T10:00:00+00:00",
+            team_config_path=str(team_config_path.resolve()),
+            org_config_path="",
+            team_name=team_config.team_name,
+            resolved_config_hash=current_hash,
+            status="partial",
+        )
+        prior.write_text(json.dumps(report.to_envelope()), encoding="utf-8")
+
+        called: list[Path] = []
+        monkeypatch.setattr(
+            "jiramator.cli.find_resumable", lambda p: called.append(p) or None
+        )
+
+        sheet = tmp_path / "input.csv"
+        sheet.write_text("Summary\nRow A\n", encoding="utf-8")
+
+        result = runner.invoke(
+            cli,
+            _import_args(
+                org_config_path,
+                team_config_path,
+                sheet,
+                "--resume",
+                str(prior),
+            ),
+        )
+
+        assert result.exit_code == 0, result.stderr
+        assert called == []
+        assert isinstance(stub_run_import["kwargs"]["prior_report"], RunReport)
+
+    def test_CI6_config_validation_error_in_import(
+        self,
+        runner: CliRunner,
+        monkeypatch: pytest.MonkeyPatch,
+        org_config_path: Path,
+        team_config_path: Path,
+        tmp_path: Path,
+    ) -> None:
+        err = ConfigValidationError(
+            file=Path("configs/teams/calcs.yaml"),
+            line=12,
+            field_path="team.project_key",
+            reason="must not be empty",
+        )
+        expected = str(err)
+
+        def _raise(_path: Path):
+            raise err
+
+        monkeypatch.setattr("jiramator.cli.load_team_config", _raise)
+
+        sheet = tmp_path / "input.csv"
+        sheet.write_text("Summary\nRow A\n", encoding="utf-8")
+
+        result = runner.invoke(
+            cli, _import_args(org_config_path, team_config_path, sheet)
+        )
+
+        assert result.exit_code == 1
+        assert expected in result.stderr
+        assert "[red" not in result.stderr
