@@ -1,18 +1,22 @@
 """Jiramator CLI — Click entrypoint and subcommands.
 
 This module is intentionally thin. It handles argument parsing, config
-loading, and error display, then delegates all real work to planner.py.
+loading, error display, and report-lifecycle wiring, then delegates
+all real work to planner.py and importer.py.
 """
 
 from __future__ import annotations
 
+import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import click
 from rich.console import Console
 
 from jiramator.config import load_org_config, load_team_config
+from jiramator.error_format import ConfigValidationError
 from jiramator.importer import (
     build_preview_report,
     render_import_execution_report,
@@ -20,6 +24,15 @@ from jiramator.importer import (
     run_import,
 )
 from jiramator.jira_client import JiraApiError, JiraClient
+from jiramator.planner import run_plan
+from jiramator.run_report import (
+    ConfigDriftError,
+    RunReport,
+    compute_resolved_hash,
+    default_report_path,
+    find_resumable,
+    write_report_atomic,
+)
 from jiramator.spreadsheet import read_spreadsheet
 
 console = Console(stderr=True)
@@ -63,6 +76,56 @@ def _resolve_org_config_path(path: Path) -> Path:
     raise click.BadParameter(f"Org config path does not exist: {path}")
 
 
+def _fail(message: str) -> None:
+    """Print *message* to stderr (plain text, no Rich markup) and exit 1."""
+    click.echo(message, err=True)
+    sys.exit(1)
+
+
+def _load_report_file(path: Path) -> RunReport:
+    """Load and validate a run-report envelope from *path*.
+
+    Exits 1 with a clear stderr message on missing file, parse error,
+    or schema-version mismatch. Never raises.
+    """
+    if not path.exists():
+        _fail(f"Resume report not found: {path}")
+    try:
+        envelope = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        _fail(f"Could not parse resume report: {path} — {exc}")
+    try:
+        return RunReport.from_envelope(envelope)
+    except (ValueError, KeyError, TypeError) as exc:
+        _fail(f"Resume report incompatible: {exc}")
+
+
+def _load_prior_report(
+    resume_arg: str | None, team_config_path: Path
+) -> RunReport | None:
+    """Resolve --resume into a RunReport (or None if not requested).
+
+    - ``resume_arg is None``: user didn't pass --resume → return None.
+    - ``resume_arg == "auto"``: user passed --resume with no value → use
+      ``find_resumable`` to discover the most recent partial/failed run
+      for this team config; exit 1 if none found.
+    - Any other string: treat as a path and load that report explicitly.
+    """
+    if resume_arg is None:
+        return None
+    if resume_arg == "auto":
+        candidate = find_resumable(team_config_path)
+        if candidate is None:
+            resolved = team_config_path.resolve()
+            _fail(
+                f"No resumable run found for {resolved} in .jiramator/runs/. "
+                f"Use --resume <path> to specify explicitly, "
+                f"or run without --resume to start fresh."
+            )
+        return _load_report_file(candidate)
+    return _load_report_file(Path(resume_arg))
+
+
 @click.group()
 @click.version_option(package_name="jiramator")
 def cli() -> None:
@@ -94,25 +157,55 @@ def cli() -> None:
     default=False,
     help="Show ticket preview and exit without creating anything.",
 )
+@click.option(
+    "--report",
+    "report_path",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Path to write run report. Default: .jiramator/runs/<UTC>-<team>.json",
+)
+@click.option(
+    "--resume",
+    "resume_arg",
+    is_flag=False,
+    flag_value="auto",
+    default=None,
+    type=click.STRING,
+    help="Resume a previous failed/partial run. Pass --resume to auto-find "
+    "the latest, or --resume <path> for a specific report.",
+)
+@click.option(
+    "--force",
+    "force",
+    is_flag=True,
+    default=False,
+    help="With --resume: ignore the resolved-config-hash drift check. "
+    "Use only if you understand the risk of duplicate creation.",
+)
 def plan(
     org_config_path: Path,
     team_config_path: Path,
     dry_run: bool,
+    report_path: Path | None,
+    resume_arg: str | None,
+    force: bool,
 ) -> None:
     """Interactive PI planning — generate tickets for a new PI."""
     # -- Load configs -------------------------------------------------------
     try:
         resolved_org_path = _resolve_org_config_path(org_config_path)
         org_config = load_org_config(resolved_org_path)
+    except ConfigValidationError as exc:
+        _fail(str(exc))
     except (click.BadParameter, FileNotFoundError, ValueError) as exc:
-        console.print(f"[red bold]Org config error:[/] {exc}")
-        sys.exit(1)
+        _fail(f"Org config error: {exc}")
 
     try:
         team_config = load_team_config(team_config_path)
+    except ConfigValidationError as exc:
+        _fail(str(exc))
     except (FileNotFoundError, ValueError) as exc:
-        console.print(f"[red bold]Team config error:[/] {exc}")
-        sys.exit(1)
+        _fail(f"Team config error: {exc}")
 
     console.print(
         f"[green]✓[/] Loaded org config: [bold]{resolved_org_path}[/]"
@@ -122,10 +215,27 @@ def plan(
         f"(team={team_config.team_name}, project={team_config.project_key})"
     )
 
-    # -- Hand off to planner ------------------------------------------------
-    from jiramator.planner import run_plan  # noqa: E402 — deferred to avoid circular
+    # -- Resolve resume + report path --------------------------------------
+    prior_report = _load_prior_report(resume_arg, team_config_path)
+    if report_path is None:
+        report_path = default_report_path(team_config_path)
 
-    run_plan(org_config, team_config, dry_run=dry_run, console=console)
+    # -- Hand off to planner -----------------------------------------------
+    try:
+        run_plan(
+            org_config,
+            team_config,
+            dry_run=dry_run,
+            console=console,
+            report_path=report_path,
+            prior_report=prior_report,
+            force=force,
+            org_config_path=resolved_org_path,
+            team_config_path=team_config_path,
+            command=list(sys.argv),
+        )
+    except ConfigDriftError as exc:
+        _fail(str(exc))
 
 
 @cli.command(name="import")
@@ -172,6 +282,38 @@ def plan(
     show_default=True,
     help="Number of prepared rows to include in preview output.",
 )
+@click.option(
+    "--encoding",
+    "encoding_override",
+    type=click.STRING,
+    default=None,
+    help="Force a specific encoding for CSV reads (bypasses auto-detection). "
+    "Common values: utf-8, utf-8-sig, cp1252, utf-16-le.",
+)
+@click.option(
+    "--report",
+    "report_path",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Path to write run report. Default: .jiramator/runs/<UTC>-<team>.json",
+)
+@click.option(
+    "--resume",
+    "resume_arg",
+    is_flag=False,
+    flag_value="auto",
+    default=None,
+    type=click.STRING,
+    help="Resume a previous import. Pass --resume to auto-find latest, "
+    "or --resume <path> for a specific report.",
+)
+@click.option(
+    "--force",
+    "force",
+    is_flag=True,
+    default=False,
+    help="With --resume: ignore the config-drift check.",
+)
 @click.argument("spreadsheet_path", type=click.Path(exists=True, path_type=Path))
 def import_command(
     org_config_path: Path,
@@ -180,31 +322,56 @@ def import_command(
     dry_run: bool,
     max_rows: int | None,
     preview_rows: int,
+    encoding_override: str | None,
+    report_path: Path | None,
+    resume_arg: str | None,
+    force: bool,
     spreadsheet_path: Path,
 ) -> None:
     """Import Jira issues from a CSV or XLSX spreadsheet."""
     try:
         resolved_org_path = _resolve_org_config_path(org_config_path)
         org_config = load_org_config(resolved_org_path)
+    except ConfigValidationError as exc:
+        _fail(str(exc))
     except (click.BadParameter, FileNotFoundError, ValueError) as exc:
-        console.print(f"[red bold]Org config error:[/] {exc}")
-        sys.exit(1)
+        _fail(f"Org config error: {exc}")
 
     try:
         team_config = load_team_config(team_config_path)
+    except ConfigValidationError as exc:
+        _fail(str(exc))
     except (FileNotFoundError, ValueError) as exc:
-        console.print(f"[red bold]Team config error:[/] {exc}")
-        sys.exit(1)
+        _fail(f"Team config error: {exc}")
 
     try:
         rows = read_spreadsheet(
             spreadsheet_path,
             sheet_name=sheet_name,
             max_rows=max_rows,
+            encoding_override=encoding_override,
         )
     except (ValueError, KeyError) as exc:
-        console.print(f"[red bold]Spreadsheet error:[/] {exc}")
-        sys.exit(1)
+        _fail(f"Spreadsheet error: {exc}")
+
+    # -- Resolve resume + report path --------------------------------------
+    prior_report = _load_prior_report(resume_arg, team_config_path)
+    if report_path is None:
+        report_path = default_report_path(team_config_path)
+
+    # Drift check (cli owns the lifecycle for import; run_import doesn't).
+    current_hash = compute_resolved_hash(org_config, team_config, None, [])
+    if (
+        prior_report is not None
+        and prior_report.resolved_config_hash != current_hash
+        and not force
+    ):
+        _fail(
+            "Config has drifted since the prior import; resume is unsafe.\n"
+            f"  prior hash:   {prior_report.resolved_config_hash[:12]}\n"
+            f"  current hash: {current_hash[:12]}\n"
+            "  Pass --resume --force to override."
+        )
 
     if dry_run:
         result = run_import(
@@ -218,6 +385,19 @@ def import_command(
         console.print(render_preview_report(result.preview, preview_rows=preview_rows))
         return
 
+    # Build a report for live runs (cli owns the lifecycle for import).
+    report = RunReport(
+        command=list(sys.argv),
+        started_at=datetime.now(timezone.utc).isoformat(),
+        team_config_path=str(team_config_path.resolve()),
+        org_config_path=str(resolved_org_path.resolve()),
+        team_name=team_config.team_name,
+        pi_label=None,
+        versions=[],
+        resolved_config_hash=current_hash,
+        status="failed",
+    )
+
     try:
         client = JiraClient(org_config)
         jira_fields = client.get_fields()
@@ -227,10 +407,28 @@ def import_command(
             team_config=team_config,
             jira_fields=jira_fields,
             client=client,
+            report=report,
+            report_path=report_path,
+            prior_report=prior_report,
         )
     except (ValueError, JiraApiError) as exc:
-        console.print(f"[red bold]Import error:[/] {exc}")
-        sys.exit(1)
+        # Persist the (possibly partial) report before exiting.
+        report.ended_at = datetime.now(timezone.utc).isoformat()
+        try:
+            write_report_atomic(report, report_path)
+        except OSError:
+            pass
+        _fail(f"Import error: {exc}")
+
+    # Finalize report status.
+    report.ended_at = datetime.now(timezone.utc).isoformat()
+    if report.counts.get("failed", 0) == 0 and report.counts.get("created", 0) > 0:
+        report.status = "success"
+    elif report.counts.get("created", 0) > 0:
+        report.status = "partial"
+    else:
+        report.status = "failed"
+    write_report_atomic(report, report_path)
 
     console.print(render_preview_report(result.preview, preview_rows=preview_rows))
     console.print(render_import_execution_report(result))
