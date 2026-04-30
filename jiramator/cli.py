@@ -194,18 +194,24 @@ def plan(
     # -- Load configs -------------------------------------------------------
     try:
         resolved_org_path = _resolve_org_config_path(org_config_path)
-        org_config = load_org_config(resolved_org_path)
+        org_config, org_tagged = load_org_config(resolved_org_path)
     except ConfigValidationError as exc:
         _fail(str(exc))
     except (click.BadParameter, FileNotFoundError, ValueError) as exc:
         _fail(f"Org config error: {exc}")
 
     try:
-        team_config = load_team_config(team_config_path)
+        team_config, team_tagged = load_team_config(team_config_path)
     except ConfigValidationError as exc:
         _fail(str(exc))
     except (FileNotFoundError, ValueError) as exc:
         _fail(f"Team config error: {exc}")
+
+    # NOTE (Phase 02-02 Task 2): merge_configs(org, team, ...) wires here
+    # to apply org default_fields → team defaults → templates. Until then,
+    # team_config carries no inherited fields. (org_tagged/team_tagged are
+    # captured for that future call site.)
+    del org_tagged, team_tagged  # silence "unused" until Task 2 wires merge_configs
 
     console.print(
         f"[green]✓[/] Loaded org config: [bold]{resolved_org_path}[/]"
@@ -331,14 +337,14 @@ def import_command(
     """Import Jira issues from a CSV or XLSX spreadsheet."""
     try:
         resolved_org_path = _resolve_org_config_path(org_config_path)
-        org_config = load_org_config(resolved_org_path)
+        org_config, _ = load_org_config(resolved_org_path)
     except ConfigValidationError as exc:
         _fail(str(exc))
     except (click.BadParameter, FileNotFoundError, ValueError) as exc:
         _fail(f"Org config error: {exc}")
 
     try:
-        team_config = load_team_config(team_config_path)
+        team_config, _ = load_team_config(team_config_path)
     except ConfigValidationError as exc:
         _fail(str(exc))
     except (FileNotFoundError, ValueError) as exc:

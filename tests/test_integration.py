@@ -48,13 +48,15 @@ EPIC_KEYS = {"bau": "CA-9001", "misc": "CA-9002"}
 @pytest.fixture(scope="module")
 def org_config():
     """Load the real MarketAxess org config."""
-    return load_org_config(_ORG_CONFIG_PATH)
+    cfg, _ = load_org_config(_ORG_CONFIG_PATH)
+    return cfg
 
 
 @pytest.fixture(scope="module")
 def team_config():
     """Load the real Calcs team config."""
-    return load_team_config(_TEAM_CONFIG_PATH)
+    cfg, _ = load_team_config(_TEAM_CONFIG_PATH)
+    return cfg
 
 
 @pytest.fixture(scope="module")

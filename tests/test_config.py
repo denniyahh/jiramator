@@ -289,7 +289,7 @@ class TestLoadOrgConfig:
     """Tests for load_org_config file loading."""
 
     def test_load_from_file(self, tmp_org_config: Path) -> None:
-        cfg = load_org_config(tmp_org_config)
+        cfg, _ = load_org_config(tmp_org_config)
         assert cfg.sprints.count == 6
 
     def test_nonexistent_file_raises(self) -> None:
@@ -308,7 +308,7 @@ class TestLoadOrgConfig:
         """Verify the shipped MarketAxess config loads and validates."""
         if not ORG_CONFIG_PATH.exists():
             pytest.skip("MarketAxess config not present")
-        cfg = load_org_config(ORG_CONFIG_PATH)
+        cfg, _ = load_org_config(ORG_CONFIG_PATH)
         assert str(cfg.jira_url) == "https://marketaxess.atlassian.net/"
         assert cfg.custom_fields["story_points"] == "customfield_10026"
         assert cfg.custom_fields["epic_link"] == "customfield_10014"
@@ -725,7 +725,7 @@ class TestLoadTeamConfig:
     """Tests for load_team_config file loading."""
 
     def test_load_from_file(self, tmp_team_config: Path) -> None:
-        cfg = load_team_config(tmp_team_config)
+        cfg, _ = load_team_config(tmp_team_config)
         assert cfg.project_key == "CA"
         assert cfg.team_name == "Calcs"
         assert len(cfg.recurring_epics) == 2
@@ -746,7 +746,7 @@ class TestLoadTeamConfig:
         """Verify the shipped Calcs team config loads and validates."""
         if not TEAM_CONFIG_PATH.exists():
             pytest.skip("Calcs team config not present")
-        cfg = load_team_config(TEAM_CONFIG_PATH)
+        cfg, _ = load_team_config(TEAM_CONFIG_PATH)
         assert cfg.project_key == "CA"
         assert cfg.team_name == "Calcs"
         assert len(cfg.recurring_epics) == 0
@@ -822,7 +822,7 @@ class TestTeamDefaultsPydantic:
     def test_p6_existing_calcs_yaml_loads_unchanged(self) -> None:
         """P6: real-world calcs.yaml (no defaults: block) loads identically."""
         # No assertion on defaults beyond "it's empty and the load succeeds."
-        cfg = load_team_config(TEAM_CONFIG_PATH)
+        cfg, _ = load_team_config(TEAM_CONFIG_PATH)
         assert cfg.defaults.fields == {}
         # Sanity-check at least one template list is non-empty (real config).
         all_templates = (

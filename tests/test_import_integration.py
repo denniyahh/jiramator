@@ -64,8 +64,8 @@ def _write_ca_risk_workbook(path: Path) -> None:
 
 class TestImportIntegration:
     def test_ca_risk_xlsx_preview_and_live_import_use_real_configs(self, tmp_path: Path) -> None:
-        org_config = load_org_config(_ORG_CONFIG_PATH)
-        team_config = load_team_config(_TEAM_CONFIG_PATH)
+        org_config, _ = load_org_config(_ORG_CONFIG_PATH)
+        team_config, _ = load_team_config(_TEAM_CONFIG_PATH)
 
         sheet_path = tmp_path / "ca-risk.xlsx"
         _write_ca_risk_workbook(sheet_path)

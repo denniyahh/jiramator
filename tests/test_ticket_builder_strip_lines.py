@@ -177,8 +177,8 @@ def test_S4_build_all_on_real_calcs_config_emits_no_marker():
     if not org_path.exists() or not team_path.exists():
         pytest.skip("Shipped configs not present in this checkout")
 
-    org_cfg = load_org_config(org_path)
-    team_cfg = load_team_config(team_path)
+    org_cfg, _ = load_org_config(org_path)
+    team_cfg, _ = load_team_config(team_path)
     bundle = build_all(
         org_config=org_cfg,
         team_config=team_cfg,
