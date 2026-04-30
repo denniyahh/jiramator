@@ -1145,3 +1145,68 @@ class TestLoaderTupleSignature:
         assert cfg.per_release_tickets[0].fields == {"summary_only": "x"}
         # But defaults model still carries the declared value:
         assert cfg.defaults.fields == {"priority": "Medium"}
+
+
+# ---------------------------------------------------------------------------
+# Plan 02-03: TeamConfig.sprints_exist tri-state field
+# ---------------------------------------------------------------------------
+
+
+class TestTeamConfigSprintsExist:
+    """Tests for the new ``TeamConfig.sprints_exist: bool | None`` field (Plan 02-03)."""
+
+    def test_se1_absent_field_defaults_to_none(self, team_config_data: dict) -> None:
+        """SE1: backward compat — absent ``sprints_exist:`` yields ``None``."""
+        cfg = TeamConfig(**team_config_data)
+        assert cfg.sprints_exist is None
+
+    def test_se2_explicit_true(self, team_config_data: dict) -> None:
+        """SE2: ``sprints_exist: true`` yields ``True``."""
+        team_config_data["sprints_exist"] = True
+        cfg = TeamConfig(**team_config_data)
+        assert cfg.sprints_exist is True
+
+    def test_se3_explicit_false(self, team_config_data: dict) -> None:
+        """SE3: ``sprints_exist: false`` yields ``False``."""
+        team_config_data["sprints_exist"] = False
+        cfg = TeamConfig(**team_config_data)
+        assert cfg.sprints_exist is False
+
+    def test_se4_explicit_null(self, team_config_data: dict, tmp_path: Path) -> None:
+        """SE4: explicit YAML ``null`` round-trips to ``None``."""
+        team_config_data["sprints_exist"] = None
+        p = tmp_path / "team.yaml"
+        p.write_text(yaml.dump(team_config_data))
+        cfg, _ = load_team_config(p)
+        assert cfg.sprints_exist is None
+
+    def test_se5_string_value_rejected(
+        self, team_config_data: dict, tmp_path: Path
+    ) -> None:
+        """SE5: non-bool/non-null values rejected with ConfigValidationError mentioning sprints_exist."""
+        team_config_data["sprints_exist"] = "yes"
+        p = tmp_path / "team.yaml"
+        p.write_text(yaml.dump(team_config_data))
+        from jiramator.error_format import ConfigValidationError
+
+        with pytest.raises(ConfigValidationError) as exc_info:
+            load_team_config(p)
+        assert "sprints_exist" in exc_info.value.field_path
+
+    def test_se6_independent_of_board_id(self, team_config_data: dict) -> None:
+        """SE6: ``sprints_exist=True`` validates even when ``board_id`` is unset (runtime concern, not validation)."""
+        team_config_data["sprints_exist"] = True
+        # No board_id set — should still validate at the model level.
+        cfg = TeamConfig(**team_config_data)
+        assert cfg.sprints_exist is True
+        assert cfg.board_id is None
+
+    def test_se7_round_trip_via_load_team_config(
+        self, team_config_data: dict, tmp_path: Path
+    ) -> None:
+        """sprints_exist survives YAML round-trip via load_team_config."""
+        team_config_data["sprints_exist"] = False
+        p = tmp_path / "team.yaml"
+        p.write_text(yaml.dump(team_config_data))
+        cfg, _ = load_team_config(p)
+        assert cfg.sprints_exist is False
