@@ -255,8 +255,8 @@ class TestSprintsExistIntegration:
         team = MagicMock()
         team.board_id = None
         # run_plan does pre-prompts (pi_num, fix_versions). Stub them.
-        monkeypatch.setattr(planner, "_prompt_pi_num", lambda c: "28")
-        monkeypatch.setattr(planner, "_prompt_fix_versions", lambda *a, **kw: ["1.0"])
+        monkeypatch.setattr(planner, "_prompt_pi_number", lambda c: ("28", "PI-28"))
+        monkeypatch.setattr(planner, "_prompt_fix_versions", lambda c: ["1.0"])
         monkeypatch.setattr(
             planner, "compute_resolved_hash", lambda *a, **kw: "a" * 64
         )

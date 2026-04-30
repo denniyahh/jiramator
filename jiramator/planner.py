@@ -27,6 +27,7 @@ from rich.prompt import Confirm, IntPrompt, Prompt
 from rich.table import Table
 
 from jiramator.config import OrgConfig, TeamConfig
+from jiramator.error_format import ConfigValidationError
 from jiramator.jira_client import JiraApiError, JiraClient
 from jiramator.run_report import (
     ConfigDriftError,
@@ -106,6 +107,44 @@ def _prompt_sprints_exist(console: Console) -> bool:
         "[bold]Are the sprints for this PI already created in Jira?[/]",
         default=False,
         console=console,
+    )
+
+
+def _resolve_sprints_exist_mode(
+    team_config: TeamConfig,
+    cli_override: bool | None,
+    console: Console,
+) -> bool:
+    """Resolve whether sprints exist for the current run (Plan 02-03).
+
+    Priority order (DC-6 — exactly one branch runs per call):
+      1. CLI flag (--sprints-exist / --no-sprints-exist) → cli_override
+      2. team_config.sprints_exist (config field)
+      3. Interactive prompt iff sys.stdin.isatty()
+      4. ConfigValidationError otherwise (non-TTY, no flag, no config)
+
+    Returns:
+        True if sprints should be resolved, False to skip resolution.
+
+    Raises:
+        ConfigValidationError: branch (4) — non-TTY with neither flag nor
+            config providing a value.
+    """
+    if cli_override is not None:
+        return cli_override
+    if team_config.sprints_exist is not None:
+        return team_config.sprints_exist
+    if sys.stdin.isatty():
+        return _prompt_sprints_exist(console)
+    raise ConfigValidationError(
+        file=Path("<runtime>"),
+        line=None,
+        field_path="sprints_exist",
+        reason=(
+            "Cannot determine whether sprints exist: stdin is not a TTY "
+            "and neither --sprints-exist/--no-sprints-exist nor "
+            "'sprints_exist:' in team config is set."
+        ),
     )
 
 
@@ -407,6 +446,7 @@ def run_plan(
     org_config_path: Path | None = None,
     team_config_path: Path | None = None,
     command: list[str] | None = None,
+    sprints_exist_override: bool | None = None,
 ) -> None:
     """Execute the full interactive PI planning flow.
 
@@ -508,6 +548,7 @@ def run_plan(
             dry_run=dry_run,
             report=report, prior_created_keys=prior_created_keys,
             persist=_persist,
+            sprints_exist_override=sprints_exist_override,
         )
     except BaseException:
         # Persist whatever state we got to before the exception (covers
@@ -529,11 +570,14 @@ def _run_plan_inner(
     report: RunReport,
     prior_created_keys: dict[str, str],
     persist,
+    sprints_exist_override: bool | None = None,
 ) -> None:
     """Inner pipeline — wrapped by run_plan's try/except for persist-on-error."""
     # Sprint assignment info
     if team_config.board_id is not None:
-        sprints_exist = _prompt_sprints_exist(console)
+        sprints_exist = _resolve_sprints_exist_mode(
+            team_config, sprints_exist_override, console
+        )
         if sprints_exist:
             console.print(
                 "  [dim]Sprint assignment will be attempted after ticket creation.[/]"
