@@ -166,6 +166,17 @@ def cli() -> None:
     help="Path to write run report. Default: .jiramator/runs/<UTC>-<team>.json",
 )
 @click.option(
+    "--sprints-exist/--no-sprints-exist",
+    "sprints_exist_override",
+    default=None,
+    help=(
+        "Whether sprints for this PI already exist in Jira. "
+        "If unset, falls back to 'sprints_exist:' in the team config, "
+        "then to an interactive prompt (or errors if stdin is not a TTY). "
+        "Use --no-sprints-exist for sprintless runs (no Jira board API call)."
+    ),
+)
+@click.option(
     "--resume",
     "resume_arg",
     is_flag=False,
@@ -188,6 +199,7 @@ def plan(
     team_config_path: Path,
     dry_run: bool,
     report_path: Path | None,
+    sprints_exist_override: bool | None,
     resume_arg: str | None,
     force: bool,
 ) -> None:
@@ -245,6 +257,7 @@ def plan(
             org_config_path=resolved_org_path,
             team_config_path=team_config_path,
             command=list(sys.argv),
+            sprints_exist_override=sprints_exist_override,
         )
     except ConfigDriftError as exc:
         _fail(str(exc))

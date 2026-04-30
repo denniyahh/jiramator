@@ -562,6 +562,7 @@ class TestRunPlanSprintHandling:
             run_plan(org_config, team_config, dry_run=True, console=console)
             mock_confirm.assert_not_called()
 
+    @patch("jiramator.planner.sys.stdin.isatty", return_value=True)
     @patch("jiramator.planner.Confirm.ask", return_value=True)
     @patch("jiramator.planner.Prompt.ask")
     @patch("jiramator.planner.IntPrompt.ask")
@@ -570,10 +571,16 @@ class TestRunPlanSprintHandling:
         mock_int_prompt,
         mock_prompt,
         mock_confirm,
+        mock_isatty,
         org_config,
         console,
     ):
-        """When board_id is set, the sprint prompt IS shown."""
+        """When board_id is set and stdin is a TTY, the sprint prompt IS shown.
+
+        Plan 02-03 DC-4 backward compat: the four-branch resolver still
+        delegates to ``_prompt_sprints_exist`` (Confirm.ask) on a TTY when
+        neither the CLI flag nor the team-config field is set.
+        """
         team_config = TeamConfig(
             project_key="TST",
             team_name="TestTeam",

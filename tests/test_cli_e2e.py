@@ -118,6 +118,7 @@ def _write_team_config(path: Path, *, team_name: str = "TestTeam") -> None:
 project_key: TST
 team_name: {team_name}
 board_id: 1
+sprints_exist: false
 recurring_epics:
   - key: bau
     summary: "{{team_name}} {{pi_label}} BAU"
