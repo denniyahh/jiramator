@@ -109,3 +109,64 @@ def did_you_mean(
     if len(matches) == 1:
         return f"(did you mean '{matches[0]}'?)"
     return f"(closest matches: {', '.join(matches)})"
+
+
+# ---------------------------------------------------------------------------
+# Phase 02-01 — layered-config merge conflict warning
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ConfigConflictWarning:
+    """A merge-time conflict surfaced when a later layer tries to write a key
+    locked by an earlier layer.
+
+    Emitted to stderr by ``jiramator.config.load_team_config`` (and, in a
+    later plan, by the org-vs-team ``merge_configs``); NOT raised — the
+    config still loads with the earlier-layer winner.
+
+    Format:
+        ``<later-file>[:<later-line>]: <field-path> — locked by
+        <earlier-layer> (<earlier-file>[:<earlier-line>]); later value
+        ignored.``
+
+    Attributes:
+        later_file:    File of the layer whose write was dropped.
+        later_line:    1-indexed line of the dropped write (``None`` if unknown).
+        earlier_file:  File of the layer that locked the key.
+        earlier_line:  1-indexed line of the locking declaration (``None`` if unknown).
+        field_path:    Dotted/bracketed path (mirrors ``format_loc`` shape).
+        earlier_layer: Human label — ``"team defaults"`` (this plan) or
+                       ``"org config"`` (Plan 02-02).
+
+    NOT an ``Exception`` subclass — warnings are printed, not raised.
+    """
+
+    later_file: Path
+    later_line: int | None
+    earlier_file: Path
+    earlier_line: int | None
+    field_path: str
+    earlier_layer: str
+
+    def __str__(self) -> str:
+        later = self._rel(self.later_file)
+        ll = f":{self.later_line}" if self.later_line is not None else ""
+        earlier = self._rel(self.earlier_file)
+        el = f":{self.earlier_line}" if self.earlier_line is not None else ""
+        return (
+            f"{later}{ll}: {self.field_path} — locked by {self.earlier_layer} "
+            f"({earlier}{el}); later value ignored."
+        )
+
+    @staticmethod
+    def _rel(p: Path) -> str:
+        """Render ``p`` relative to CWD if possible, else absolute.
+
+        Mirrors ``ConfigValidationError._relative_to_cwd`` so both
+        formatters render paths identically.
+        """
+        try:
+            return str(p.resolve().relative_to(Path.cwd()))
+        except ValueError:
+            return str(p)

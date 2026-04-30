@@ -342,11 +342,11 @@ class TestMergeTeamDefaultsIntoTemplates:
         )
         assert len(warnings) == 1
         w = warnings[0]
-        # `priority: High` lives in the defaults.fields mapping (line 4 — the
-        # `fields:` mapping starts there). resolve_line returns the parent
-        # mapping's line for scalar leaves, so earlier_line should be the
-        # `fields:` mapping line.
-        assert w.earlier_line == 4
+        # PyYAML's start_mark for a nested mapping points at its first child
+        # key. The `defaults.fields` mapping's first child is `priority: High`
+        # at line 5 — so earlier_line resolves to 5.
+        assert w.earlier_line == 5
         # `priority: Medium` lives in the per_release_tickets[0].fields
-        # mapping which starts at line 8.
-        assert w.later_line == 8
+        # mapping. That mapping's first child key is `priority: Medium` at
+        # line 9.
+        assert w.later_line == 9

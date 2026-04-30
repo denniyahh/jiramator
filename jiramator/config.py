@@ -375,6 +375,29 @@ class TicketTemplate(BaseModel):
         return self
 
 
+class TeamDefaults(BaseModel):
+    """Per-team baseline ``fields`` block, merged into every template
+    (recurring_epics, per_release_tickets, per_sprint_tickets) under this
+    team config at load time.
+
+    Same-name keys in template ``fields:`` are warned and dropped at load
+    time — no override mechanism (Phase 2 CONTEXT G-1, "locked is locked").
+
+    Future-proofing: the wrapper sub-model (rather than a bare
+    ``dict[str, Any]``) leaves room to add other shared template defaults
+    (e.g. ``summary_prefix``) without restructuring.
+    """
+
+    fields: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Locked fields applied to every template in this team config. "
+            "Same-name keys in template fields are warned and dropped at "
+            "load time."
+        ),
+    )
+
+
 class TeamConfig(BaseModel):
     """Team-level configuration — project key, epics, ticket templates."""
 
@@ -392,6 +415,15 @@ class TeamConfig(BaseModel):
         default_factory=dict,
         description="Maps version → {sprint_group: sprint_number} for per-release sprint assignment. "
                     "e.g. {'26.2.1': {'pre': 2, 'post': 3}}",
+    )
+
+    defaults: TeamDefaults = Field(
+        default_factory=TeamDefaults,
+        description=(
+            "Team-internal default fields merged into all templates in "
+            "this team config (recurring_epics, per_release_tickets, "
+            "per_sprint_tickets). Locked at load time per Phase 2 G-1."
+        ),
     )
 
     existing_epics: dict[str, str] = Field(
