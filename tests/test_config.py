@@ -834,13 +834,48 @@ class TestTeamDefaultsPydantic:
             assert "__line__" not in tmpl.fields
 
 
-@pytest.mark.skip(
-    reason="Re-enabled in Plan 02-02 Task 2 once merge_configs lands. "
-    "load_team_config no longer applies the team-defaults merge; "
-    "the I1-I6 tests will be rewired to call merge_configs(stub_org, ..., team)."
-)
+@pytest.fixture
+def _stub_org() -> OrgConfig:
+    """Minimal OrgConfig with empty default_fields — used to drive merge_configs
+    in the Plan-02-01 team-defaults integration tests (Phase 02-02 rewire)."""
+    return OrgConfig(
+        jira_url="https://example.atlassian.net",
+        sprints=SprintConfig(
+            count=4, standard_length_weeks=2, long_length_weeks=3
+        ),
+    )
+
+
+def _load_and_merge(
+    team_path: Path, stub_org: OrgConfig
+) -> TeamConfig:
+    """Helper: load team config and apply merge_configs with a stub org.
+
+    Used by the Plan-02-01 I1-I6 integration tests, rewired in Plan 02-02
+    Task 2 to drive the team-defaults layer through the new orchestrator
+    (the single composition point).
+    """
+    from jiramator.config_merge import merge_configs
+
+    team, team_tagged = load_team_config(team_path)
+    return merge_configs(
+        org_model=stub_org,
+        org_tagged_raw={},
+        org_file=Path("stub-org.yaml"),
+        team_model=team,
+        team_tagged_raw=team_tagged,
+        team_file=team_path,
+    )
+
+
 class TestTeamDefaultsMergeIntegration:
-    """End-to-end integration tests through load_team_config."""
+    """End-to-end integration tests for the team-defaults layer.
+
+    Rewired in Plan 02-02 Task 2: routes through ``merge_configs`` with a
+    stub OrgConfig (default_fields={}) so the layer-2 (team-defaults vs
+    template) behavior is exercised exactly as in Plan 02-01, but via the
+    new single composition point.
+    """
 
     def _write_team(self, tmp_path: Path, data: dict) -> Path:
         p = tmp_path / "team.yaml"
@@ -852,6 +887,7 @@ class TestTeamDefaultsMergeIntegration:
         tmp_path: Path,
         team_config_data: dict,
         capsys,
+        _stub_org: OrgConfig,
     ) -> None:
         """I1: defaults.priority + ticket without priority → ticket gets it."""
         team_config_data["defaults"] = {"fields": {"priority": "Medium"}}
@@ -859,7 +895,7 @@ class TestTeamDefaultsMergeIntegration:
             {"summary": "Hello {pi_label}", "fields": {"summary_only": "x"}},
         ]
         p = self._write_team(tmp_path, team_config_data)
-        cfg = load_team_config(p)
+        cfg = _load_and_merge(p, _stub_org)
         captured = capsys.readouterr()
         assert captured.err == ""
         merged = cfg.per_release_tickets[0].fields
@@ -870,6 +906,7 @@ class TestTeamDefaultsMergeIntegration:
         tmp_path: Path,
         team_config_data: dict,
         capsys,
+        _stub_org: OrgConfig,
     ) -> None:
         """I2: defaults.priority=Medium + ticket priority=High → defaults win, warn."""
         team_config_data["defaults"] = {"fields": {"priority": "Medium"}}
@@ -877,7 +914,7 @@ class TestTeamDefaultsMergeIntegration:
             {"summary": "Hello {pi_label}", "fields": {"priority": "High"}},
         ]
         p = self._write_team(tmp_path, team_config_data)
-        cfg = load_team_config(p)
+        cfg = _load_and_merge(p, _stub_org)
         captured = capsys.readouterr()
         assert "locked by team defaults" in captured.err
         assert "per_release_tickets[0].fields.priority" in captured.err
@@ -889,6 +926,7 @@ class TestTeamDefaultsMergeIntegration:
         tmp_path: Path,
         team_config_data: dict,
         capsys,
+        _stub_org: OrgConfig,
     ) -> None:
         """I3: defaults flow into recurring_epics + per_release + per_sprint alike."""
         team_config_data["defaults"] = {"fields": {"priority": "Medium"}}
@@ -902,7 +940,7 @@ class TestTeamDefaultsMergeIntegration:
             {"summary": "Sprint {sprint_num}", "fields": {}},
         ]
         p = self._write_team(tmp_path, team_config_data)
-        cfg = load_team_config(p)
+        cfg = _load_and_merge(p, _stub_org)
         assert capsys.readouterr().err == ""
         assert cfg.recurring_epics[0].fields == {"priority": "Medium"}
         assert cfg.per_release_tickets[0].fields == {"priority": "Medium"}
@@ -913,6 +951,7 @@ class TestTeamDefaultsMergeIntegration:
         tmp_path: Path,
         team_config_data: dict,
         capsys,
+        _stub_org: OrgConfig,
     ) -> None:
         """I4: multi-select list value concats earlier-first, no warning."""
         team_config_data["defaults"] = {
@@ -925,7 +964,7 @@ class TestTeamDefaultsMergeIntegration:
             },
         ]
         p = self._write_team(tmp_path, team_config_data)
-        cfg = load_team_config(p)
+        cfg = _load_and_merge(p, _stub_org)
         assert capsys.readouterr().err == ""
         merged = cfg.per_release_tickets[0].fields["customfield_10273"]
         assert merged == [{"value": "No"}, {"value": "Yes"}]
@@ -935,6 +974,7 @@ class TestTeamDefaultsMergeIntegration:
         tmp_path: Path,
         team_config_data: dict,
         capsys,
+        _stub_org: OrgConfig,
     ) -> None:
         """I5: hoist 4 calcs.yaml-style repeated fields into defaults; templates inherit."""
         common_defaults = {
@@ -961,7 +1001,7 @@ class TestTeamDefaultsMergeIntegration:
         # customfield_10014, which collides with the hoisted defaults).
         team_config_data["per_sprint_tickets"] = []
         p = self._write_team(tmp_path, team_config_data)
-        cfg = load_team_config(p)
+        cfg = _load_and_merge(p, _stub_org)
         assert capsys.readouterr().err == ""
         tmpl = cfg.per_release_tickets[0].fields
         # All four hoisted fields present:
@@ -976,8 +1016,9 @@ class TestTeamDefaultsMergeIntegration:
         tmp_path: Path,
         team_config_data: dict,
         capsys,
+        _stub_org: OrgConfig,
     ) -> None:
-        """I6: with no `console` arg the loader instantiates Console(stderr=True).
+        """I6: with no `console` arg merge_configs instantiates Console(stderr=True).
 
         The warning text appears on captured stderr (capsys.err), proving the
         default-console path is wired.
@@ -987,7 +1028,7 @@ class TestTeamDefaultsMergeIntegration:
             {"summary": "S {pi_label}", "fields": {"priority": "High"}},
         ]
         p = self._write_team(tmp_path, team_config_data)
-        load_team_config(p)
+        _load_and_merge(p, _stub_org)
         out = capsys.readouterr()
         assert out.out == ""
         assert "locked by team defaults" in out.err

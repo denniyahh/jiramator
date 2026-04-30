@@ -750,9 +750,9 @@ class TestPlanCommandMergeWiring:
             )})
             return original(**kwargs)
 
-        monkeypatch.setattr(cm_mod, "merge_configs", _recording)
-        # cli.py imports merge_configs lazily inside `plan`, so patching the
-        # module-level symbol is sufficient.
+        # cli.py binds `merge_configs` at import time, so patch it on the
+        # cli module (not on config_merge) to intercept the call.
+        monkeypatch.setattr(cli_mod, "merge_configs", _recording)
         monkeypatch.setattr(cli_mod, "run_plan", lambda *a, **k: None)
 
         result = runner.invoke(
