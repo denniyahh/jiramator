@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from jiramator.config import OrgConfig, TeamConfig
 from jiramator.field_resolver import ResolvedField, resolve_field_name
 from jiramator.jira_client import JiraApiError, JiraClient
+from jiramator.run_report import IssueResult, RunReport, write_report_atomic
 from jiramator.value_coercion import coerce_field_value, should_omit_value
 
 
@@ -208,6 +211,24 @@ def build_preview_report(
     )
 
 
+def _row_template_key(row_number: int, summary: str) -> str:
+    """Return the deterministic template_key for an imported row.
+
+    Shape: ``imported:row<N>:<8-char-sha256-prefix-of-summary>``.
+
+    Why include both row_number and summary-hash:
+      - row_number alone breaks when the user reorders rows in the spreadsheet.
+      - summary alone collides when two rows share an identical summary (legal
+        in CSV though discouraged).
+      - Combining them: reordering invalidates resume for those rows (they get
+        re-attempted, where Jira's existing-summary dedup catches duplicates),
+        AND duplicate-summary rows are still distinguished by row_number. This
+        is the conservative choice — see Plan 01-04 §Task 3 behavior notes.
+    """
+    digest = hashlib.sha256(summary.encode("utf-8")).hexdigest()[:8]
+    return f"imported:row{row_number}:{digest}"
+
+
 def run_import(
     rows: list[dict[str, Any]],
     *,
@@ -216,8 +237,23 @@ def run_import(
     jira_fields: list[dict[str, Any]] | None,
     client: JiraClient | None,
     dry_run: bool = False,
+    report: RunReport | None = None,
+    report_path: Path | None = None,
+    prior_report: RunReport | None = None,
 ) -> ImportRunResult:
-    """Execute a duplicate-safe row-by-row import, or just preview it in dry-run mode."""
+    """Execute a duplicate-safe row-by-row import, or just preview it in dry-run mode.
+
+    Args:
+        report: A RunReport that this function will append per-row results to
+            and re-persist after every row. cli.py constructs this; legacy
+            callers may pass None to skip report emission entirely.
+        report_path: Where to write the report. Combined with ``report`` to
+            enable per-row atomic persistence.
+        prior_report: When provided, rows whose template_key appears with
+            ``status="created"`` are skipped (their prior IssueResults are
+            carried forward into ``report``). Failed/pending entries are
+            re-attempted.
+    """
     preview = build_preview_report(
         rows,
         org_config=org_config,
@@ -231,7 +267,45 @@ def run_import(
     if client is None:
         raise ValueError("client is required for live imports")
 
-    successful_rows = [result for result in preview.row_results if result.success and result.payload]
+    # ---- Resume skip-set + carry-forward of prior-created issues --------
+    prior_created: dict[str, str] = {}
+    if prior_report is not None:
+        for issue in prior_report.issues:
+            if (
+                issue.kind == "imported"
+                and issue.status == "created"
+                and issue.jira_key
+            ):
+                prior_created[issue.template_key] = issue.jira_key
+                if report is not None:
+                    report.issues.append(
+                        IssueResult(
+                            template_key=issue.template_key,
+                            kind="imported",
+                            status="created",
+                            jira_key=issue.jira_key,
+                        )
+                    )
+                    report.counts["created"] = report.counts.get("created", 0) + 1
+
+    def _persist() -> None:
+        if report is not None and report_path is not None:
+            write_report_atomic(report, report_path)
+
+    def _record(tk: str, status: str, **kw: Any) -> None:
+        if report is None:
+            return
+        report.issues.append(
+            IssueResult(template_key=tk, kind="imported", status=status, **kw)  # type: ignore[arg-type]
+        )
+        report.counts[status] = report.counts.get(status, 0) + 1
+
+    _persist()  # initial write reflecting prior-carry-forward
+
+    successful_rows = [
+        result for result in preview.row_results
+        if result.success and result.payload
+    ]
     seen_summaries = client.find_issue_keys_by_summaries(
         team_config.project_key,
         [result.summary for result in successful_rows],
@@ -251,36 +325,64 @@ def run_import(
             if resolved.jira_field == "reporter":
                 reporter_headers.add(source_header)
 
-    for result in preview.row_results:
-        if not result.success or result.payload is None:
-            failed.append((result.row_number, result.summary, result.error or "Unknown row error"))
-            continue
+    try:
+        for result in preview.row_results:
+            tk = _row_template_key(result.row_number, result.summary)
 
-        existing_key = seen_summaries.get(result.summary)
-        if existing_key:
-            skipped.append((result.row_number, result.summary, existing_key))
-            continue
+            # ---- Resume skip ------------------------------------------------
+            if tk in prior_created:
+                # Already recorded above via carry-forward; mirror into the
+                # legacy ImportRunResult so callers see consistent state.
+                created.append((result.row_number, result.summary, prior_created[tk]))
+                continue
 
-        payload = {
-            "fields": dict(result.payload["fields"]),
-        }
-        source_row = source_rows_by_number.get(result.row_number, {})
-        for header in reporter_headers:
-            reporter_value = source_row.get(header)
-            if isinstance(reporter_value, str) and reporter_value.strip():
-                account_id = client.find_user_account_id(reporter_value)
-                if account_id:
-                    payload["fields"]["reporter"] = {"accountId": account_id}
-                break
+            # ---- Failed-build branch ---------------------------------------
+            if not result.success or result.payload is None:
+                err = result.error or "Unknown row error"
+                failed.append((result.row_number, result.summary, err))
+                _record(tk, "failed", error=err)
+                _persist()
+                continue
 
-        try:
-            created_key = client.create_issue(payload)
-        except JiraApiError as exc:
-            failed.append((result.row_number, result.summary, str(exc)))
-            continue
+            # ---- Existing-in-Jira dedup branch -----------------------------
+            existing_key = seen_summaries.get(result.summary)
+            if existing_key:
+                skipped.append((result.row_number, result.summary, existing_key))
+                _record(tk, "skipped", jira_key=existing_key)
+                _persist()
+                continue
 
-        seen_summaries[result.summary] = created_key
-        created.append((result.row_number, result.summary, created_key))
+            # ---- Build send payload ----------------------------------------
+            payload = {
+                "fields": dict(result.payload["fields"]),
+            }
+            source_row = source_rows_by_number.get(result.row_number, {})
+            for header in reporter_headers:
+                reporter_value = source_row.get(header)
+                if isinstance(reporter_value, str) and reporter_value.strip():
+                    account_id = client.find_user_account_id(reporter_value)
+                    if account_id:
+                        payload["fields"]["reporter"] = {"accountId": account_id}
+                    break
+
+            # ---- Create -----------------------------------------------------
+            try:
+                created_key = client.create_issue(payload)
+            except JiraApiError as exc:
+                err = str(exc)
+                failed.append((result.row_number, result.summary, err))
+                _record(tk, "failed", error=err)
+                _persist()
+                continue
+
+            seen_summaries[result.summary] = created_key
+            created.append((result.row_number, result.summary, created_key))
+            _record(tk, "created", jira_key=created_key)
+            _persist()
+    except BaseException:
+        # Persist whatever we got before the exception (KeyboardInterrupt et al).
+        _persist()
+        raise
 
     return ImportRunResult(
         preview=preview,
