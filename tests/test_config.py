@@ -758,3 +758,228 @@ class TestLoadTeamConfig:
         prod = cfg.per_sprint_tickets[0]
         assert prod.extra_on_long_sprint == 1
         assert prod.long_sprint_suffix == ["a", "b"]
+
+
+# ===========================================================================
+# PHASE 02-01 — TEAM DEFAULTS (TEMPLATE INHERITANCE)
+# ===========================================================================
+
+
+import io
+
+from rich.console import Console
+
+from jiramator.config import TeamDefaults
+from jiramator.error_format import ConfigConflictWarning
+
+
+class TestTeamDefaultsPydantic:
+    """Pydantic-shape tests for the new TeamConfig.defaults field."""
+
+    def test_p1_defaults_absent_yields_empty(self, team_config_data: dict) -> None:
+        """P1: existing team config without `defaults:` defaults to empty."""
+        cfg = TeamConfig(**team_config_data)
+        assert isinstance(cfg.defaults, TeamDefaults)
+        assert cfg.defaults.fields == {}
+
+    def test_p2_defaults_empty_dict_accepted(self, team_config_data: dict) -> None:
+        """P2: `defaults: {}` validates to empty TeamDefaults."""
+        team_config_data["defaults"] = {}
+        cfg = TeamConfig(**team_config_data)
+        assert cfg.defaults.fields == {}
+
+    def test_p3_defaults_fields_priority(self, team_config_data: dict) -> None:
+        """P3: defaults.fields.priority loads verbatim."""
+        team_config_data["defaults"] = {"fields": {"priority": "Medium"}}
+        cfg = TeamConfig(**team_config_data)
+        # Pydantic constructor does NOT run the merge; only load_team_config does.
+        assert cfg.defaults.fields == {"priority": "Medium"}
+
+    def test_p4_defaults_fields_multiple_keys(self, team_config_data: dict) -> None:
+        """P4: defaults.fields carries arbitrary key shapes verbatim."""
+        team_config_data["defaults"] = {
+            "fields": {
+                "priority": "Medium",
+                "customfield_10273": [{"value": "No"}],
+            },
+        }
+        cfg = TeamConfig(**team_config_data)
+        assert cfg.defaults.fields["priority"] == "Medium"
+        assert cfg.defaults.fields["customfield_10273"] == [{"value": "No"}]
+
+    def test_p5_defaults_non_dict_raises(
+        self, team_config_data: dict, tmp_path: Path
+    ) -> None:
+        """P5: `defaults: 42` raises ConfigValidationError citing `defaults`."""
+        team_config_data["defaults"] = 42
+        p = tmp_path / "team.yaml"
+        p.write_text(yaml.dump(team_config_data))
+        from jiramator.error_format import ConfigValidationError
+        with pytest.raises(ConfigValidationError) as exc:
+            load_team_config(p)
+        assert "defaults" in exc.value.field_path
+
+    def test_p6_existing_calcs_yaml_loads_unchanged(self) -> None:
+        """P6: real-world calcs.yaml (no defaults: block) loads identically."""
+        # No assertion on defaults beyond "it's empty and the load succeeds."
+        cfg = load_team_config(TEAM_CONFIG_PATH)
+        assert cfg.defaults.fields == {}
+        # Sanity-check at least one template list is non-empty (real config).
+        all_templates = (
+            cfg.recurring_epics + cfg.per_release_tickets + cfg.per_sprint_tickets
+        )
+        assert len(all_templates) >= 1
+        # No template should have gained a `__line__` key from merge.
+        for tmpl in all_templates:
+            assert "__line__" not in tmpl.fields
+
+
+class TestTeamDefaultsMergeIntegration:
+    """End-to-end integration tests through load_team_config."""
+
+    def _write_team(self, tmp_path: Path, data: dict) -> Path:
+        p = tmp_path / "team.yaml"
+        p.write_text(yaml.dump(data))
+        return p
+
+    def test_i1_disjoint_priority_merges_with_no_warning(
+        self,
+        tmp_path: Path,
+        team_config_data: dict,
+        capsys,
+    ) -> None:
+        """I1: defaults.priority + ticket without priority → ticket gets it."""
+        team_config_data["defaults"] = {"fields": {"priority": "Medium"}}
+        team_config_data["per_release_tickets"] = [
+            {"summary": "Hello {pi_label}", "fields": {"summary_only": "x"}},
+        ]
+        p = self._write_team(tmp_path, team_config_data)
+        cfg = load_team_config(p)
+        captured = capsys.readouterr()
+        assert captured.err == ""
+        merged = cfg.per_release_tickets[0].fields
+        assert merged == {"summary_only": "x", "priority": "Medium"}
+
+    def test_i2_conflict_emits_stderr_warning_and_defaults_win(
+        self,
+        tmp_path: Path,
+        team_config_data: dict,
+        capsys,
+    ) -> None:
+        """I2: defaults.priority=Medium + ticket priority=High → defaults win, warn."""
+        team_config_data["defaults"] = {"fields": {"priority": "Medium"}}
+        team_config_data["per_release_tickets"] = [
+            {"summary": "Hello {pi_label}", "fields": {"priority": "High"}},
+        ]
+        p = self._write_team(tmp_path, team_config_data)
+        cfg = load_team_config(p)
+        captured = capsys.readouterr()
+        assert "locked by team defaults" in captured.err
+        assert "per_release_tickets[0].fields.priority" in captured.err
+        assert "later value ignored." in captured.err
+        assert cfg.per_release_tickets[0].fields["priority"] == "Medium"
+
+    def test_i3_defaults_propagate_across_all_three_lists(
+        self,
+        tmp_path: Path,
+        team_config_data: dict,
+        capsys,
+    ) -> None:
+        """I3: defaults flow into recurring_epics + per_release + per_sprint alike."""
+        team_config_data["defaults"] = {"fields": {"priority": "Medium"}}
+        team_config_data["recurring_epics"] = [
+            {"key": "bau", "summary": "{team_name} BAU", "fields": {}},
+        ]
+        team_config_data["per_release_tickets"] = [
+            {"summary": "Hello {pi_label}", "fields": {}},
+        ]
+        team_config_data["per_sprint_tickets"] = [
+            {"summary": "Sprint {sprint_num}", "fields": {}},
+        ]
+        p = self._write_team(tmp_path, team_config_data)
+        cfg = load_team_config(p)
+        assert capsys.readouterr().err == ""
+        assert cfg.recurring_epics[0].fields == {"priority": "Medium"}
+        assert cfg.per_release_tickets[0].fields == {"priority": "Medium"}
+        assert cfg.per_sprint_tickets[0].fields == {"priority": "Medium"}
+
+    def test_i4_list_typed_defaults_concat_no_warning(
+        self,
+        tmp_path: Path,
+        team_config_data: dict,
+        capsys,
+    ) -> None:
+        """I4: multi-select list value concats earlier-first, no warning."""
+        team_config_data["defaults"] = {
+            "fields": {"customfield_10273": [{"value": "No"}]},
+        }
+        team_config_data["per_release_tickets"] = [
+            {
+                "summary": "S {pi_label}",
+                "fields": {"customfield_10273": [{"value": "Yes"}]},
+            },
+        ]
+        p = self._write_team(tmp_path, team_config_data)
+        cfg = load_team_config(p)
+        assert capsys.readouterr().err == ""
+        merged = cfg.per_release_tickets[0].fields["customfield_10273"]
+        assert merged == [{"value": "No"}, {"value": "Yes"}]
+
+    def test_i5_calcs_style_realistic_fixture(
+        self,
+        tmp_path: Path,
+        team_config_data: dict,
+        capsys,
+    ) -> None:
+        """I5: hoist 4 calcs.yaml-style repeated fields into defaults; templates inherit."""
+        common_defaults = {
+            "priority": "Medium",
+            "customfield_10273": [{"value": "No"}],
+            "customfield_10026": 0.5,
+            "customfield_10014": "$epic:misc",
+        }
+        team_config_data["defaults"] = {"fields": common_defaults}
+        team_config_data["recurring_epics"] = [
+            {"key": "misc", "summary": "{team_name} Misc"},
+        ]
+        team_config_data["per_release_tickets"] = [
+            {
+                "summary": "Pre-regression {version}",
+                "fields": {
+                    "issuetype": "Task",
+                    "labels": ["{pi_label}", "Testing"],
+                    "fixVersions": ["{version}"],
+                },
+            },
+        ]
+        p = self._write_team(tmp_path, team_config_data)
+        cfg = load_team_config(p)
+        assert capsys.readouterr().err == ""
+        tmpl = cfg.per_release_tickets[0].fields
+        # All four hoisted fields present:
+        for k, v in common_defaults.items():
+            assert tmpl[k] == v
+        # Plus the template-specific fields:
+        assert tmpl["issuetype"] == "Task"
+        assert tmpl["fixVersions"] == ["{version}"]
+
+    def test_i6_warnings_routed_via_default_console_to_stderr(
+        self,
+        tmp_path: Path,
+        team_config_data: dict,
+        capsys,
+    ) -> None:
+        """I6: with no `console` arg the loader instantiates Console(stderr=True).
+
+        The warning text appears on captured stderr (capsys.err), proving the
+        default-console path is wired.
+        """
+        team_config_data["defaults"] = {"fields": {"priority": "Medium"}}
+        team_config_data["per_release_tickets"] = [
+            {"summary": "S {pi_label}", "fields": {"priority": "High"}},
+        ]
+        p = self._write_team(tmp_path, team_config_data)
+        load_team_config(p)
+        out = capsys.readouterr()
+        assert out.out == ""
+        assert "locked by team defaults" in out.err
