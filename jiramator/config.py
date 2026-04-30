@@ -427,6 +427,28 @@ class TeamConfig(BaseModel):
         default=None,
         description="Sprint name pattern for matching (e.g. 'CA Sprint {pi_num}.{sprint_num}')",
     )
+    sprints_exist: bool | None = Field(
+        default=None,
+        description=(
+            "Whether sprints for the PI already exist in Jira at `plan` time. "
+            "Tri-state: `None` (default) means 'ask interactively when running on a "
+            "TTY, error on non-TTY'; `True` means resolve sprints; `False` means "
+            "skip sprint resolution entirely (no Jira board API call). The CLI flag "
+            "`--sprints-exist / --no-sprints-exist` overrides this field at runtime. "
+            "When set to `False`, no Jira sprint API call is made even if `board_id` "
+            "is configured (Plan 02-03, DC-8)."
+        ),
+    )
+
+    @field_validator("sprints_exist", mode="before")
+    @classmethod
+    def _strict_bool_or_none(cls, v):
+        """Reject non-bool/non-None values (no string coercion — Plan 02-03 SE5)."""
+        if v is None or isinstance(v, bool):
+            return v
+        raise ValueError(
+            f"sprints_exist must be a boolean or null, got {type(v).__name__}: {v!r}"
+        )
     release_sprint_map: dict[str, dict[str, int]] = Field(
         default_factory=dict,
         description="Maps version → {sprint_group: sprint_number} for per-release sprint assignment. "
