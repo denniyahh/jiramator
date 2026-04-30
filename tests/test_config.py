@@ -834,6 +834,11 @@ class TestTeamDefaultsPydantic:
             assert "__line__" not in tmpl.fields
 
 
+@pytest.mark.skip(
+    reason="Re-enabled in Plan 02-02 Task 2 once merge_configs lands. "
+    "load_team_config no longer applies the team-defaults merge; "
+    "the I1-I6 tests will be rewired to call merge_configs(stub_org, ..., team)."
+)
 class TestTeamDefaultsMergeIntegration:
     """End-to-end integration tests through load_team_config."""
 
@@ -986,3 +991,116 @@ class TestTeamDefaultsMergeIntegration:
         out = capsys.readouterr()
         assert out.out == ""
         assert "locked by team defaults" in out.err
+
+
+# ===========================================================================
+# PHASE 02-02 — ORG default_fields + tuple-returning loaders
+# ===========================================================================
+
+
+class TestOrgDefaultFields:
+    """Pydantic-shape tests for the new OrgConfig.default_fields field."""
+
+    def test_o1_default_fields_absent_yields_empty(
+        self, org_config_data: dict
+    ) -> None:
+        """O1: existing org config without `default_fields:` defaults to empty."""
+        cfg = OrgConfig(**org_config_data)
+        assert cfg.default_fields == {}
+
+    def test_o2_default_fields_empty_dict_accepted(
+        self, org_config_data: dict
+    ) -> None:
+        """O2: `default_fields: {}` validates to empty dict."""
+        org_config_data["default_fields"] = {}
+        cfg = OrgConfig(**org_config_data)
+        assert cfg.default_fields == {}
+
+    def test_o3_default_fields_priority(self, org_config_data: dict) -> None:
+        """O3: `default_fields: { priority: Medium }` loads verbatim."""
+        org_config_data["default_fields"] = {"priority": "Medium"}
+        cfg = OrgConfig(**org_config_data)
+        assert cfg.default_fields == {"priority": "Medium"}
+
+    def test_o4_default_fields_multiple_keys_with_list(
+        self, org_config_data: dict
+    ) -> None:
+        """O4: arbitrary key shapes preserved verbatim, list shape intact."""
+        org_config_data["default_fields"] = {
+            "priority": "Medium",
+            "customfield_10273": [{"value": "No"}],
+        }
+        cfg = OrgConfig(**org_config_data)
+        assert cfg.default_fields["priority"] == "Medium"
+        assert cfg.default_fields["customfield_10273"] == [{"value": "No"}]
+
+    def test_o5_default_fields_non_dict_raises(
+        self, org_config_data: dict, tmp_path: Path
+    ) -> None:
+        """O5: `default_fields: 42` raises ConfigValidationError citing
+        `default_fields`."""
+        org_config_data["default_fields"] = 42
+        p = tmp_path / "org.yaml"
+        p.write_text(yaml.dump(org_config_data))
+        from jiramator.error_format import ConfigValidationError
+        with pytest.raises(ConfigValidationError) as exc:
+            load_org_config(p)
+        assert "default_fields" in exc.value.field_path
+
+    def test_o6_existing_marketaxess_yaml_unchanged(self) -> None:
+        """O6: real-world marketaxess.yaml (no default_fields) loads with empty."""
+        if not ORG_CONFIG_PATH.exists():
+            pytest.skip("Marketaxess org config not present")
+        cfg, _ = load_org_config(ORG_CONFIG_PATH)
+        assert cfg.default_fields == {}
+
+
+class TestLoaderTupleSignature:
+    """Loader signature change: load_*_config now returns (model, tagged_raw)."""
+
+    def test_l1_load_org_config_returns_tuple(
+        self, tmp_org_config: Path
+    ) -> None:
+        """L1: load_org_config returns a 2-tuple of (OrgConfig, tagged_raw)."""
+        result = load_org_config(tmp_org_config)
+        assert isinstance(result, tuple)
+        assert len(result) == 2
+        cfg, tagged = result
+        assert isinstance(cfg, OrgConfig)
+        # tagged_raw is a dict with line markers injected by the YAML loader.
+        from jiramator.yaml_loader import LINE_KEY
+        assert isinstance(tagged, dict)
+        assert LINE_KEY in tagged
+
+    def test_l2_load_team_config_returns_tuple(
+        self, tmp_team_config: Path
+    ) -> None:
+        """L2: load_team_config returns a 2-tuple of (TeamConfig, tagged_raw)."""
+        result = load_team_config(tmp_team_config)
+        assert isinstance(result, tuple)
+        assert len(result) == 2
+        cfg, tagged = result
+        assert isinstance(cfg, TeamConfig)
+        from jiramator.yaml_loader import LINE_KEY
+        assert isinstance(tagged, dict)
+        assert LINE_KEY in tagged
+
+    def test_l4_load_team_config_does_not_apply_defaults(
+        self, tmp_path: Path, team_config_data: dict
+    ) -> None:
+        """L4: load_team_config no longer applies team defaults internally.
+
+        Template `fields` after load reflect the raw YAML; merge_configs
+        is now the single composition point.
+        """
+        team_config_data["defaults"] = {"fields": {"priority": "Medium"}}
+        team_config_data["per_release_tickets"] = [
+            {"summary": "Hello {pi_label}", "fields": {"summary_only": "x"}},
+        ]
+        p = tmp_path / "team.yaml"
+        p.write_text(yaml.dump(team_config_data))
+        cfg, _ = load_team_config(p)
+        # Defaults NOT applied — template's fields untouched.
+        assert cfg.per_release_tickets[0].fields == {"summary_only": "x"}
+        # But defaults model still carries the declared value:
+        assert cfg.defaults.fields == {"priority": "Medium"}
