@@ -952,6 +952,9 @@ class TestTeamDefaultsMergeIntegration:
                 },
             },
         ]
+        # Drop the default base fixture's per_sprint_tickets (it sets
+        # customfield_10014, which collides with the hoisted defaults).
+        team_config_data["per_sprint_tickets"] = []
         p = self._write_team(tmp_path, team_config_data)
         cfg = load_team_config(p)
         assert capsys.readouterr().err == ""
