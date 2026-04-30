@@ -21,10 +21,10 @@ from jiramator.config import (
     TicketTemplate,
 )
 from jiramator.config_merge import (
+    _apply_team_layer_to_templates as merge_team_defaults_into_templates,
     canonical_form,
     concat_dedup_lists,
     deep_merge_dicts,
-    merge_team_defaults_into_templates,
 )
 from jiramator.error_format import ConfigConflictWarning
 from jiramator.yaml_loader import safe_load_with_lines
@@ -207,7 +207,12 @@ def _make_team(
     )
 
 
-class TestMergeTeamDefaultsIntoTemplates:
+class TestMergeConfigsTeamLayer:
+    """Layer-2 (team defaults → templates) coverage; uses the internal helper
+    ``_apply_team_layer_to_templates`` aliased here as
+    ``merge_team_defaults_into_templates`` for continuity with Plan 02-01.
+    The helper IS what ``merge_configs`` calls for layer 2.
+    """
     def test_m1_no_defaults_is_noop(self) -> None:
         team = _make_team(
             per_release_tickets=[

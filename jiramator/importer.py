@@ -14,6 +14,24 @@ from jiramator.run_report import IssueResult, RunReport, write_report_atomic
 from jiramator.value_coercion import coerce_field_value, should_omit_value
 
 
+# ---------------------------------------------------------------------------
+# Phase 02-02 scope note — Template inheritance does NOT apply to imports.
+#
+# Org ``default_fields`` (locked, org-wide — see jiramator/config.py:OrgConfig)
+# is consumed by the ``plan`` command via jiramator.config_merge.merge_configs.
+# The ``import`` command does NOT call merge_configs and does NOT apply
+# ``default_fields`` to row payloads. The existing ``bulk_create.defaults``
+# (gap-fill semantics, applied below in ``_apply_defaults``) is unchanged.
+#
+# Rationale: Phase 2 ships team-internal ``defaults:`` (highest user value),
+# org ``default_fields`` (cross-team locking for ``plan`` runs), and sprint-mode
+# config (orthogonal). Importer parity for ``default_fields`` requires
+# threading a Console through ``build_row_payload`` and is deferred to a
+# follow-up phase to keep Phase 2 scope bounded. See:
+#   .planning/phases/02-template-inheritance-sprint-assignment/02-PATTERNS.md §11
+# ---------------------------------------------------------------------------
+
+
 @dataclass(frozen=True)
 class RowBuildResult:
     """Pure result of transforming one source row into a Jira payload."""

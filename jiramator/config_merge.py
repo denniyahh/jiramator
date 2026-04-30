@@ -1,11 +1,12 @@
 """Layered config merge engine for Phase 2 template inheritance.
 
-Pure functions; no I/O. The orchestrator (``config.load_team_config`` and,
-in Plan 02-02, ``merge_configs``) calls these and pipes the returned
-warnings to ``Console(stderr=True)``.
+Pure functions; no I/O. The orchestrator (``merge_configs``) is called by
+``cli.py:plan`` after both ``load_org_config`` and ``load_team_config``,
+piping the returned warnings to ``Console(stderr=True)``.
 
 Public surface:
-    merge_team_defaults_into_templates  — top-level orchestrator (this plan)
+    merge_configs                       — top-level orchestrator
+                                          (org → team-defaults → templates)
     deep_merge_dicts                    — earlier-wins recursive dict merge
     concat_dedup_lists                  — earlier-first list concat with
                                           canonical-form dedup
@@ -34,7 +35,9 @@ from jiramator.error_format import ConfigConflictWarning
 from jiramator.yaml_loader import LINE_KEY, resolve_line
 
 if TYPE_CHECKING:
-    from jiramator.config import TeamConfig
+    from rich.console import Console
+
+    from jiramator.config import OrgConfig, TeamConfig
 
 
 def canonical_form(item: object) -> str:
@@ -169,32 +172,19 @@ def deep_merge_dicts(
     return out, warnings
 
 
-def merge_team_defaults_into_templates(
+def _apply_team_layer_to_templates(
     team_model: TeamConfig,
     team_tagged_raw: object,
     team_file: Path,
+    *,
+    earlier_layer: str = "team defaults",
 ) -> list[ConfigConflictWarning]:
-    """Apply ``team_model.defaults.fields`` into every template's ``fields``.
+    """Merge ``team_model.defaults.fields`` into every template's ``fields``.
 
-    Mutates (in place) the ``fields`` attribute of every entry in:
-        - ``team_model.recurring_epics``
-        - ``team_model.per_release_tickets``
-        - ``team_model.per_sprint_tickets``
-
-    The original ``team_model.defaults.fields`` dict is NOT mutated; the
-    merge always builds fresh dicts (T-02-06).
-
-    Args:
-        team_model:        The validated ``TeamConfig`` to enrich.
-        team_tagged_raw:   The line-tagged YAML tree from
-                           ``yaml_loader.safe_load_with_lines`` (used to
-                           resolve line numbers for conflict warnings).
-        team_file:         The team config file path (for warning text).
-
-    Returns:
-        A list of ``ConfigConflictWarning`` describing per-template
-        same-key conflicts where the template tried to override a key
-        locked by team defaults. Empty list if ``defaults.fields`` is empty.
+    Internal helper called by ``merge_configs`` (layer 2). Also used by the
+    test suite to exercise team-layer behavior in isolation. The function
+    mutates each template's ``fields``; it returns the (un-emitted)
+    warnings so the caller can route them however it likes.
     """
     defaults_fields = team_model.defaults.fields
     if not defaults_fields:
@@ -206,7 +196,6 @@ def merge_team_defaults_into_templates(
         ("per_release_tickets", team_model.per_release_tickets),
         ("per_sprint_tickets", team_model.per_sprint_tickets),
     ]
-
     for list_name, templates in sources:
         for idx, tmpl in enumerate(templates):
             merged, warnings = deep_merge_dicts(
@@ -219,9 +208,105 @@ def merge_team_defaults_into_templates(
                 later_loc=(list_name, idx, "fields"),
                 earlier_tagged_root=team_tagged_raw,
                 later_tagged_root=team_tagged_raw,
-                earlier_layer="team defaults",
+                earlier_layer=earlier_layer,
             )
             tmpl.fields = merged
             all_warnings.extend(warnings)
-
     return all_warnings
+
+
+def merge_configs(
+    *,
+    org_model: OrgConfig,
+    org_tagged_raw: object,
+    org_file: Path,
+    team_model: TeamConfig,
+    team_tagged_raw: object,
+    team_file: Path,
+    console: Console | None = None,
+) -> TeamConfig:
+    """Apply the layered merge: org.default_fields → team.defaults.fields → template fields.
+
+    The single composition point for Phase 2 template inheritance. Called
+    by ``cli.py:plan`` between ``load_*_config`` and ``run_plan``.
+
+    Mutates ``team_model``:
+        - ``team_model.defaults.fields`` is replaced with the merged
+          effective team-level lock layer (org default_fields composed
+          earlier-wins onto team-declared defaults).
+        - Every template's ``fields`` (recurring_epics, per_release_tickets,
+          per_sprint_tickets) is replaced with the result of merging the
+          effective team-level lock layer earlier onto the template's
+          declared fields.
+
+    The original ``org_model.default_fields`` dict is NOT mutated; the
+    merge always builds fresh dicts (T-02-09).
+
+    Layer order (CONTEXT working_model, RESEARCH §R4):
+        1. ``org_model.default_fields``       — locked org-wide
+        2. ``team_model.defaults.fields``     — locked team-wide (gap-fill
+           against org locks, earlier-wins on collisions)
+        3. per-template ``fields``            — fills remaining gaps
+
+    Args:
+        org_model:        Validated ``OrgConfig`` (carries ``default_fields``).
+        org_tagged_raw:   Line-tagged YAML tree from ``load_org_config``.
+        org_file:         Path of the org config file (for warning text).
+        team_model:       Validated ``TeamConfig`` (carries ``defaults`` +
+                          template lists). Mutated in place.
+        team_tagged_raw:  Line-tagged YAML tree from ``load_team_config``.
+        team_file:        Path of the team config file (for warning text).
+        console:          Optional ``rich.console.Console`` to receive
+                          ``ConfigConflictWarning`` lines. When ``None``,
+                          a fresh ``Console(stderr=True)`` is instantiated.
+
+    Returns:
+        The mutated ``team_model`` for caller convenience.
+
+    Conflict-warning attribution:
+        - Layer-1 conflicts (org default_fields vs team defaults.fields)
+          set ``earlier_layer="org config"``.
+        - Layer-2 conflicts (effective team-level locks vs per-template
+          ``fields:``) set ``earlier_layer="team defaults"``. The merged
+          ``team_model.defaults.fields`` reflects the org overrides, so
+          users can introspect to see which keys are org-locked.
+    """
+    warnings: list[ConfigConflictWarning] = []
+
+    # --- Layer 1: org.default_fields  →  team.defaults.fields -------------
+    org_defaults = org_model.default_fields or {}
+    team_defaults_fields = team_model.defaults.fields or {}
+    merged_team_defaults, w1 = deep_merge_dicts(
+        earlier=org_defaults,
+        later=team_defaults_fields,
+        path_prefix="defaults.fields",
+        earlier_file=org_file,
+        later_file=team_file,
+        earlier_loc=("default_fields",),
+        later_loc=("defaults", "fields"),
+        earlier_tagged_root=org_tagged_raw,
+        later_tagged_root=team_tagged_raw,
+        earlier_layer="org config",
+    )
+    warnings.extend(w1)
+    # Persist the merged effective layer so introspection sees it.
+    team_model.defaults.fields = merged_team_defaults
+
+    # --- Layer 2: effective team-level locks  →  per-template fields ------
+    w2 = _apply_team_layer_to_templates(
+        team_model=team_model,
+        team_tagged_raw=team_tagged_raw,
+        team_file=team_file,
+        earlier_layer="team defaults",
+    )
+    warnings.extend(w2)
+
+    # --- Emit warnings ----------------------------------------------------
+    if warnings:
+        if console is None:
+            from rich.console import Console as _Console
+            console = _Console(stderr=True)
+        for w in warnings:
+            console.print(str(w), highlight=False, markup=False)
+
+    return team_model

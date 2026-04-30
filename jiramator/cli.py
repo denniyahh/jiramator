@@ -16,6 +16,7 @@ import click
 from rich.console import Console
 
 from jiramator.config import load_org_config, load_team_config
+from jiramator.config_merge import merge_configs
 from jiramator.error_format import ConfigValidationError
 from jiramator.importer import (
     build_preview_report,
@@ -207,11 +208,16 @@ def plan(
     except (FileNotFoundError, ValueError) as exc:
         _fail(f"Team config error: {exc}")
 
-    # NOTE (Phase 02-02 Task 2): merge_configs(org, team, ...) wires here
-    # to apply org default_fields → team defaults → templates. Until then,
-    # team_config carries no inherited fields. (org_tagged/team_tagged are
-    # captured for that future call site.)
-    del org_tagged, team_tagged  # silence "unused" until Task 2 wires merge_configs
+    # -- Apply Phase 02-02 layered merge: org → team-defaults → templates --
+    team_config = merge_configs(
+        org_model=org_config,
+        org_tagged_raw=org_tagged,
+        org_file=resolved_org_path,
+        team_model=team_config,
+        team_tagged_raw=team_tagged,
+        team_file=team_config_path,
+        console=console,
+    )
 
     console.print(
         f"[green]✓[/] Loaded org config: [bold]{resolved_org_path}[/]"
