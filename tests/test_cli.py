@@ -761,3 +761,93 @@ class TestPlanCommandMergeWiring:
         assert result.exit_code == 0, result.output
         assert len(calls) == 1
         assert calls[0]["team_file"] == team_config_path
+
+
+# ---------------------------------------------------------------------------
+# Plan 02-03: --sprints-exist / --no-sprints-exist flag wiring (CL3-CL7)
+# ---------------------------------------------------------------------------
+
+
+class TestPlanSprintsExistFlag:
+    """Click flag pair forwards into ``run_plan`` as ``sprints_exist_override``."""
+
+    def test_cl3_default_no_flag_is_none(
+        self,
+        runner: CliRunner,
+        stub_run_plan: dict[str, Any],
+        org_config_path: Path,
+        team_config_path: Path,
+    ) -> None:
+        """CL3: no flag → sprints_exist_override is None."""
+        result = runner.invoke(
+            cli, _plan_args(org_config_path, team_config_path, "--dry-run")
+        )
+        assert result.exit_code == 0, result.output
+        assert stub_run_plan["kwargs"]["sprints_exist_override"] is None
+
+    def test_cl4_positive_flag_is_true(
+        self,
+        runner: CliRunner,
+        stub_run_plan: dict[str, Any],
+        org_config_path: Path,
+        team_config_path: Path,
+    ) -> None:
+        """CL4: --sprints-exist → sprints_exist_override is True."""
+        result = runner.invoke(
+            cli,
+            _plan_args(
+                org_config_path, team_config_path, "--sprints-exist", "--dry-run"
+            ),
+        )
+        assert result.exit_code == 0, result.output
+        assert stub_run_plan["kwargs"]["sprints_exist_override"] is True
+
+    def test_cl5_negative_flag_is_false(
+        self,
+        runner: CliRunner,
+        stub_run_plan: dict[str, Any],
+        org_config_path: Path,
+        team_config_path: Path,
+    ) -> None:
+        """CL5: --no-sprints-exist → sprints_exist_override is False."""
+        result = runner.invoke(
+            cli,
+            _plan_args(
+                org_config_path, team_config_path, "--no-sprints-exist", "--dry-run"
+            ),
+        )
+        assert result.exit_code == 0, result.output
+        assert stub_run_plan["kwargs"]["sprints_exist_override"] is False
+
+    def test_cl6_help_documents_flag_and_fallback(
+        self, runner: CliRunner
+    ) -> None:
+        """CL6: plan --help mentions both flags and the team-config fallback."""
+        result = runner.invoke(cli, ["plan", "--help"])
+        assert result.exit_code == 0
+        assert "--sprints-exist" in result.output
+        assert "--no-sprints-exist" in result.output
+        assert "team config" in result.output
+
+    def test_cl7_negative_with_dry_run_exits_zero(
+        self,
+        runner: CliRunner,
+        stub_run_plan: dict[str, Any],
+        org_config_path: Path,
+        team_config_path: Path,
+    ) -> None:
+        """CL7: --no-sprints-exist --dry-run is accepted (passthrough smoke)."""
+        result = runner.invoke(
+            cli,
+            _plan_args(
+                org_config_path, team_config_path, "--no-sprints-exist", "--dry-run"
+            ),
+        )
+        assert result.exit_code == 0, result.output
+
+    def test_cl8_flag_not_on_import_command(self, runner: CliRunner) -> None:
+        """RESEARCH §R5: --sprints-exist flag must NOT appear on import command."""
+        result = runner.invoke(cli, ["import", "--help"])
+        assert result.exit_code == 0
+        assert "--sprints-exist" not in result.output
+        assert "--no-sprints-exist" not in result.output
