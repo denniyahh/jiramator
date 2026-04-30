@@ -701,3 +701,63 @@ class TestImportCommandFlags:
         assert result.exit_code == 1
         assert expected in result.stderr
         assert "[red" not in result.stderr
+
+
+# ===========================================================================
+# Phase 02-02 — CLI plan command wires merge_configs between loads + run_plan
+# ===========================================================================
+
+
+class TestPlanCommandMergeWiring:
+    """Verify the `plan` command unpacks loader tuples and calls merge_configs."""
+
+    def test_cl1_plan_unpacks_loader_tuples(
+        self,
+        runner: CliRunner,
+        monkeypatch: pytest.MonkeyPatch,
+        org_config_path: Path,
+        team_config_path: Path,
+    ) -> None:
+        """CL1: plan command runs cleanly with the new tuple-returning loaders."""
+        from jiramator import cli as cli_mod
+
+        def _stub_run_plan(*_args, **_kwargs):
+            return None
+
+        monkeypatch.setattr(cli_mod, "run_plan", _stub_run_plan)
+        result = runner.invoke(
+            cli, _plan_args(org_config_path, team_config_path, "--dry-run")
+        )
+        assert result.exit_code == 0, result.output
+
+    def test_cl2_plan_calls_merge_configs(
+        self,
+        runner: CliRunner,
+        monkeypatch: pytest.MonkeyPatch,
+        org_config_path: Path,
+        team_config_path: Path,
+    ) -> None:
+        """CL2: plan command invokes merge_configs between loads and run_plan."""
+        from jiramator import cli as cli_mod
+        from jiramator import config_merge as cm_mod
+
+        calls: list[dict] = []
+        original = cm_mod.merge_configs
+
+        def _recording(**kwargs):
+            calls.append({k: v for k, v in kwargs.items() if k in (
+                "org_file", "team_file"
+            )})
+            return original(**kwargs)
+
+        monkeypatch.setattr(cm_mod, "merge_configs", _recording)
+        # cli.py imports merge_configs lazily inside `plan`, so patching the
+        # module-level symbol is sufficient.
+        monkeypatch.setattr(cli_mod, "run_plan", lambda *a, **k: None)
+
+        result = runner.invoke(
+            cli, _plan_args(org_config_path, team_config_path, "--dry-run")
+        )
+        assert result.exit_code == 0, result.output
+        assert len(calls) == 1
+        assert calls[0]["team_file"] == team_config_path

@@ -350,3 +350,269 @@ class TestMergeTeamDefaultsIntoTemplates:
         # mapping. That mapping's first child key is `priority: Medium` at
         # line 9.
         assert w.later_line == 9
+
+
+# ===========================================================================
+# Phase 02-02 — merge_configs orchestrator (org → team-defaults → templates)
+# ===========================================================================
+
+
+import copy
+import io
+
+from rich.console import Console
+
+from jiramator.config import OrgConfig, SprintConfig
+
+
+def _make_org(default_fields: dict | None = None) -> OrgConfig:
+    """Build a minimal OrgConfig programmatically (Phase 02-02 helper)."""
+    return OrgConfig(
+        jira_url="https://example.atlassian.net",
+        sprints=SprintConfig(
+            count=4, standard_length_weeks=2, long_length_weeks=3
+        ),
+        default_fields=default_fields or {},
+    )
+
+
+def _stderr_console() -> tuple[Console, io.StringIO]:
+    """Build a Console writing to an in-memory buffer (test harness)."""
+    buf = io.StringIO()
+    return Console(file=buf, force_terminal=False, width=200), buf
+
+
+class TestMergeConfigs:
+    """Tests for the org → team-defaults → template orchestrator."""
+
+    ORG_FILE = Path("org.yaml")
+    TEAM_FILE = Path("team.yaml")
+
+    def test_mc1_noop_when_no_org_defaults_and_no_team_defaults(self) -> None:
+        """MC1: empty org default_fields + empty team defaults = no-op."""
+        from jiramator.config_merge import merge_configs
+
+        org = _make_org()
+        team = _make_team(
+            per_release_tickets=[{"summary": "S", "fields": {"a": 1}}],
+        )
+        console, buf = _stderr_console()
+        result = merge_configs(
+            org_model=org,
+            org_tagged_raw={},
+            org_file=self.ORG_FILE,
+            team_model=team,
+            team_tagged_raw={},
+            team_file=self.TEAM_FILE,
+            console=console,
+        )
+        assert result is team  # mutates and returns
+        assert team.per_release_tickets[0].fields == {"a": 1}
+        assert buf.getvalue() == ""
+
+    def test_mc2_org_default_field_propagates_to_template(self) -> None:
+        """MC2: org default_fields.priority flows into a template lacking it."""
+        from jiramator.config_merge import merge_configs
+
+        org = _make_org({"priority": "Medium"})
+        team = _make_team(
+            per_release_tickets=[{"summary": "S", "fields": {"a": 1}}],
+        )
+        console, buf = _stderr_console()
+        merge_configs(
+            org_model=org,
+            org_tagged_raw={},
+            org_file=self.ORG_FILE,
+            team_model=team,
+            team_tagged_raw={},
+            team_file=self.TEAM_FILE,
+            console=console,
+        )
+        assert team.per_release_tickets[0].fields == {
+            "a": 1, "priority": "Medium",
+        }
+        assert buf.getvalue() == ""
+
+    def test_mc3_org_vs_team_defaults_conflict_org_wins(self) -> None:
+        """MC3: org.priority=High locks; team defaults priority=Medium dropped."""
+        from jiramator.config_merge import merge_configs
+
+        org = _make_org({"priority": "High"})
+        team = _make_team(
+            defaults_fields={"priority": "Medium"},
+            per_release_tickets=[{"summary": "S", "fields": {}}],
+        )
+        console, buf = _stderr_console()
+        merge_configs(
+            org_model=org,
+            org_tagged_raw={},
+            org_file=self.ORG_FILE,
+            team_model=team,
+            team_tagged_raw={},
+            team_file=self.TEAM_FILE,
+            console=console,
+        )
+        # Layer-1 effective lock = High (org wins).
+        assert team.defaults.fields == {"priority": "High"}
+        # Template inherits High.
+        assert team.per_release_tickets[0].fields == {"priority": "High"}
+        # Exactly one warning, attributed to the org config.
+        text = buf.getvalue()
+        assert "locked by org config" in text
+        assert "defaults.fields.priority" in text
+        # Single warning line — count occurrences of "locked by".
+        assert text.count("locked by") == 1
+
+    def test_mc4_org_vs_template_conflict_skipping_team_defaults(self) -> None:
+        """MC4: org.priority=High vs template.priority=Low (team defaults empty)."""
+        from jiramator.config_merge import merge_configs
+
+        org = _make_org({"priority": "High"})
+        team = _make_team(
+            per_release_tickets=[
+                {"summary": "S", "fields": {"priority": "Low"}}
+            ],
+        )
+        console, buf = _stderr_console()
+        merge_configs(
+            org_model=org,
+            org_tagged_raw={},
+            org_file=self.ORG_FILE,
+            team_model=team,
+            team_tagged_raw={},
+            team_file=self.TEAM_FILE,
+            console=console,
+        )
+        # Layer 2: effective team-level lock includes priority=High;
+        # template's Low is dropped.
+        assert team.per_release_tickets[0].fields == {"priority": "High"}
+        text = buf.getvalue()
+        # The template-level conflict is attributed to "team defaults"
+        # (per the plan's simplification — the merged team-level layer is
+        # the locker visible at layer 2). The user can inspect
+        # team.defaults.fields to see the org-locked value.
+        assert "locked by team defaults" in text
+        assert "per_release_tickets[0].fields.priority" in text
+
+    def test_mc5_three_layer_composition(self) -> None:
+        """MC5: org > team-defaults > template, with two warnings."""
+        from jiramator.config_merge import merge_configs
+
+        org = _make_org({"priority": "High"})
+        team = _make_team(
+            defaults_fields={"priority": "Medium", "story_points": 0.5},
+            per_release_tickets=[
+                {
+                    "summary": "S",
+                    "fields": {
+                        "priority": "Low",
+                        "story_points": 1,
+                        "summary_only": "x",
+                    },
+                },
+            ],
+        )
+        console, buf = _stderr_console()
+        merge_configs(
+            org_model=org,
+            org_tagged_raw={},
+            org_file=self.ORG_FILE,
+            team_model=team,
+            team_tagged_raw={},
+            team_file=self.TEAM_FILE,
+            console=console,
+        )
+        merged = team.per_release_tickets[0].fields
+        assert merged["priority"] == "High"           # org wins
+        assert merged["story_points"] == 0.5          # team-defaults wins over template
+        assert merged["summary_only"] == "x"          # untouched
+        # Effective team-level lock layer reflects org override.
+        assert team.defaults.fields == {
+            "priority": "High", "story_points": 0.5,
+        }
+        text = buf.getvalue()
+        # One warning at layer 1 (org vs team defaults: priority).
+        assert "locked by org config" in text
+        # At least one warning at layer 2 (team defaults vs template:
+        # story_points; priority on this template is also a conflict but
+        # attribution is "team defaults" per the simplification).
+        assert "locked by team defaults" in text
+        assert "story_points" in text
+
+    def test_mc6_lists_concat_across_three_layers(self) -> None:
+        """MC6: list values concat earlier-first across all three layers."""
+        from jiramator.config_merge import merge_configs
+
+        org = _make_org({"customfield_10273": [{"value": "No"}]})
+        team = _make_team(
+            defaults_fields={"customfield_10273": [{"value": "Yes"}]},
+            per_release_tickets=[
+                {
+                    "summary": "S",
+                    "fields": {"customfield_10273": [{"value": "Maybe"}]},
+                },
+            ],
+        )
+        console, buf = _stderr_console()
+        merge_configs(
+            org_model=org,
+            org_tagged_raw={},
+            org_file=self.ORG_FILE,
+            team_model=team,
+            team_tagged_raw={},
+            team_file=self.TEAM_FILE,
+            console=console,
+        )
+        assert team.per_release_tickets[0].fields["customfield_10273"] == [
+            {"value": "No"},
+            {"value": "Yes"},
+            {"value": "Maybe"},
+        ]
+        assert buf.getvalue() == ""
+
+    def test_mc7_does_not_mutate_source_dicts(self) -> None:
+        """MC7: input org.default_fields is not mutated (shape preserved)."""
+        from jiramator.config_merge import merge_configs
+
+        org_defaults = {"priority": "Medium"}
+        org_defaults_snapshot = copy.deepcopy(org_defaults)
+        org = _make_org(org_defaults)
+        team = _make_team(
+            per_release_tickets=[{"summary": "S", "fields": {"a": 1}}],
+        )
+        console, _ = _stderr_console()
+        merge_configs(
+            org_model=org,
+            org_tagged_raw={},
+            org_file=self.ORG_FILE,
+            team_model=team,
+            team_tagged_raw={},
+            team_file=self.TEAM_FILE,
+            console=console,
+        )
+        # The original dict object passed in must be unchanged.
+        assert org_defaults == org_defaults_snapshot
+
+    def test_mc8_warnings_route_to_stderr_when_console_none(
+        self, capsys
+    ) -> None:
+        """MC8: with console=None, warnings flow via Console(stderr=True)."""
+        from jiramator.config_merge import merge_configs
+
+        org = _make_org({"priority": "High"})
+        team = _make_team(
+            defaults_fields={"priority": "Medium"},
+            per_release_tickets=[{"summary": "S", "fields": {}}],
+        )
+        merge_configs(
+            org_model=org,
+            org_tagged_raw={},
+            org_file=self.ORG_FILE,
+            team_model=team,
+            team_tagged_raw={},
+            team_file=self.TEAM_FILE,
+            console=None,
+        )
+        out = capsys.readouterr()
+        assert out.out == ""
+        assert "locked by org config" in out.err
