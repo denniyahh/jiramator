@@ -574,6 +574,7 @@ def _run_plan_inner(
 ) -> None:
     """Inner pipeline — wrapped by run_plan's try/except for persist-on-error."""
     # Sprint assignment info
+    sprints_exist: bool = False
     if team_config.board_id is not None:
         sprints_exist = _resolve_sprints_exist_mode(
             team_config, sprints_exist_override, console
@@ -702,7 +703,7 @@ def _run_plan_inner(
     )
 
     # -- Step 11b: Sprint assignment ----------------------------------------
-    if team_config.board_id is not None:
+    if team_config.board_id is not None and sprints_exist:
         console.print("\n[bold]Resolving sprints...[/]\n")
         all_ticketable = final_payloads["per_release"] + final_payloads["per_sprint"]
         try:
@@ -715,6 +716,9 @@ def _run_plan_inner(
             for p in final_payloads["per_release"] + final_payloads["per_sprint"]:
                 p.pop("_sprint_num", None)
     else:
+        # DC-8: when sprints_exist is False, skip _resolve_sprint_ids entirely
+        # (no client.get_board_sprints API call). Strip annotation so it
+        # doesn't leak into Jira payloads.
         for p in final_payloads["per_release"] + final_payloads["per_sprint"]:
             p.pop("_sprint_num", None)
 
