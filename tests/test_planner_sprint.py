@@ -275,24 +275,85 @@ class TestSprintsExistIntegration:
         assert captured.get("sprints_exist_override") is True
 
     def test_ii1_no_board_api_call_when_false(self, monkeypatch):
-        """II1 (DC-8): when sprints_exist resolves to False, get_board_sprints not invoked."""
+        """II1 (DC-8): when sprints_exist resolves to False, get_board_sprints not invoked.
+
+        Real integration test: drives _run_plan_inner with a wired mock JiraClient.
+        Asserts client.get_board_sprints() is NEVER called even when board_id is set.
+        """
         from jiramator import planner
 
-        # Direct unit assertion: when resolver returns False, the existing
-        # planner.py:537-542 branch prints "skipped" and never reaches
-        # _resolve_sprint_ids. We assert this via the resolver alone here;
-        # a full _run_plan_inner integration would require deep mocking that
-        # test_ii3 already exercises.
-        prompt_mock = MagicMock()
-        monkeypatch.setattr(planner, "_prompt_sprints_exist", prompt_mock)
-        client = MagicMock()
-        tc = _make_team_with_sprints_exist(False, board_id=42)
+        # Mock JiraClient at module level so _run_plan_inner uses the mock
+        client_mock = MagicMock()
+        # If get_board_sprints is ever called, fail loudly:
+        client_mock.get_board_sprints.side_effect = AssertionError(
+            "DC-8 violation: get_board_sprints() called when sprints_exist=False"
+        )
+        # create_issue returns a fake key for any payload:
+        client_mock.create_issue.side_effect = lambda payload: "FAKE-1"
+        # check_versions_exist returns all existing (no-op):
+        client_mock.check_versions_exist.return_value = {}
 
-        result = planner._resolve_sprints_exist_mode(tc, None, _make_console())
+        monkeypatch.setattr(planner, "JiraClient", lambda *a, **kw: client_mock)
+        # Skip the duplicate-warning Confirm.ask
+        monkeypatch.setattr(planner, "Confirm", MagicMock())
+        planner.Confirm.ask = MagicMock(return_value=True)
 
-        assert result is False
-        client.get_board_sprints.assert_not_called()
-        prompt_mock.assert_not_called()
+        # Build minimal real configs via dicts → Pydantic
+        from jiramator.config import OrgConfig, TeamConfig, SprintConfig
+        from jiramator.run_report import RunReport
+
+        org = OrgConfig(
+            jira_url="https://jira.example.com",
+            custom_fields={},
+            sprints=SprintConfig(count=4, standard_length_weeks=2, long_length_weeks=3),
+        )
+        team = TeamConfig(
+            project_key="PROJ",
+            team_name="Test Team",
+            board_id=362,  # board_id IS set — but sprints_exist=False must still skip
+            sprints_exist=False,
+            sprint_name_template="PI-{pi_num}.{sprint_num}",
+            release_sprint_map={},
+            recurring_epics=[],
+            per_release_tickets=[],
+            per_sprint_tickets=[],
+        )
+
+        # Force credential resolution to succeed without env vars
+        monkeypatch.setenv("JIRA_EMAIL", "x@x.com")
+        monkeypatch.setenv("JIRA_TOKEN", "tok")
+
+        report = RunReport(
+            command=["plan"],
+            started_at="2026-01-01T00:00:00Z",
+            team_config_path="team.yaml",
+            org_config_path="org.yaml",
+            team_name="Test Team",
+            pi_label="PI-28",
+            versions=["1.0"],
+            resolved_config_hash="a" * 64,
+        )
+
+        # Call _run_plan_inner directly (bypass run_plan's pre-prompts)
+        planner._run_plan_inner(
+            org_config=org,
+            team_config=team,
+            pi_label="PI-28",
+            pi_num="28",
+            versions=["1.0"],
+            dry_run=False,  # MUST be live to exercise the API path
+            console=_make_console(),
+            report=report,
+            prior_created_keys={},
+            persist=lambda: None,
+            sprints_exist_override=None,  # use config (sprints_exist=False)
+        )
+
+        # The whole point: get_board_sprints must never have been called
+        assert client_mock.get_board_sprints.call_count == 0, (
+            "DC-8 violation: get_board_sprints() was called even though "
+            "sprints_exist=False"
+        )
 
     def test_ii4_backward_compat_tty_prompt_default_false(self, monkeypatch):
         """II4: existing TTY users (config=None, cli=None) still hit _prompt_sprints_exist."""
