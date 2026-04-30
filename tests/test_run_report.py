@@ -302,8 +302,8 @@ class TestResolvedHash:
         self, org_config_path, team_config_path
     ):
         from jiramator.config import load_org_config, load_team_config
-        org = load_org_config(org_config_path)
-        team = load_team_config(team_config_path)
+        org, _ = load_org_config(org_config_path)
+        team, _ = load_team_config(team_config_path)
         h1 = compute_resolved_hash(org, team, "PI28", ["26.1.1", "26.1.2"])
         h2 = compute_resolved_hash(org, team, "PI28", ["26.1.1", "26.1.2"])
         assert h1 == h2
@@ -312,8 +312,8 @@ class TestResolvedHash:
 
     def test_21_versions_order_matters(self, org_config_path, team_config_path):
         from jiramator.config import load_org_config, load_team_config
-        org = load_org_config(org_config_path)
-        team = load_team_config(team_config_path)
+        org, _ = load_org_config(org_config_path)
+        team, _ = load_team_config(team_config_path)
         h_ascending = compute_resolved_hash(org, team, "PI28", ["26.1.1", "26.1.2"])
         h_descending = compute_resolved_hash(org, team, "PI28", ["26.1.2", "26.1.1"])
         assert h_ascending != h_descending
@@ -322,8 +322,8 @@ class TestResolvedHash:
         self, org_config_path, team_config_path
     ):
         from jiramator.config import load_org_config, load_team_config
-        org = load_org_config(org_config_path)
-        team = load_team_config(team_config_path)
+        org, _ = load_org_config(org_config_path)
+        team, _ = load_team_config(team_config_path)
         h1 = compute_resolved_hash(org, team, "PI28", ["26.1.1"])
         h2 = compute_resolved_hash(org, team, "PI29", ["26.1.1"])
         assert h1 != h2
@@ -332,8 +332,8 @@ class TestResolvedHash:
         self, org_config_path, team_config_path
     ):
         from jiramator.config import load_org_config, load_team_config
-        org = load_org_config(org_config_path)
-        team = load_team_config(team_config_path)
+        org, _ = load_org_config(org_config_path)
+        team, _ = load_team_config(team_config_path)
         h1 = compute_resolved_hash(org, team, "PI28", ["26.1.1"])
         # Mutate a copy via re-construction (Pydantic models are kinda-mutable
         # but we go through model_copy for cleanliness).
@@ -346,10 +346,10 @@ class TestResolvedHash:
     ):
         """Two independent loads of the same YAML produce the same hash."""
         from jiramator.config import load_org_config, load_team_config
-        org_a = load_org_config(org_config_path)
-        team_a = load_team_config(team_config_path)
-        org_b = load_org_config(org_config_path)
-        team_b = load_team_config(team_config_path)
+        org_a, _ = load_org_config(org_config_path)
+        team_a, _ = load_team_config(team_config_path)
+        org_b, _ = load_org_config(org_config_path)
+        team_b, _ = load_team_config(team_config_path)
         h_a = compute_resolved_hash(org_a, team_a, "PI28", ["26.1.1"])
         h_b = compute_resolved_hash(org_b, team_b, "PI28", ["26.1.1"])
         assert h_a == h_b

@@ -105,6 +105,18 @@ class OrgConfig(BaseModel):
         default_factory=BulkCreateConfig,
         description="Shared config for ad-hoc bulk issue creation workflows",
     )
+    default_fields: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Locked fields applied to every issue created via `plan` (epics, "
+            "per-release tickets, per-sprint tickets) under any team config in "
+            "this org. Keys mirror the Jira `fields:` shape on templates "
+            "(logical names like `priority` or direct Jira keys like "
+            "`customfield_10273`). Same-name keys in team `defaults:` or "
+            "template `fields:` are warned and dropped at config-load time. "
+            "Phase 2: NOT applied to the `import` command path; see importer.py."
+        ),
+    )
     sprints: SprintConfig = Field(description="Sprint cadence configuration")
 
     def get_custom_field_id(self, logical_name: str) -> str:
@@ -246,8 +258,12 @@ def _load_yaml_with_lines(path: Path, kind: str) -> tuple[dict[str, Any], object
     return clean, tagged_raw
 
 
-def load_org_config(path: str | Path) -> OrgConfig:
+def load_org_config(path: str | Path) -> tuple[OrgConfig, object]:
     """Load and validate an org config from a YAML file.
+
+    Returns the validated model AND the line-tagged raw tree (the latter is
+    consumed by Phase 2 ``merge_configs`` to resolve line numbers when
+    emitting org-vs-team conflict warnings).
 
     Raises ``ConfigValidationError`` for missing files, parse errors,
     non-mapping roots, and Pydantic validation failures (with file:line
@@ -256,7 +272,7 @@ def load_org_config(path: str | Path) -> OrgConfig:
     path = Path(path)
     clean, tagged = _load_yaml_with_lines(path, kind="Org")
     try:
-        return OrgConfig(**clean)
+        return OrgConfig(**clean), tagged
     except ValidationError as exc:
         raise _wrap_validation_error(exc, file=path, tagged_raw=tagged) from exc
 
@@ -499,25 +515,23 @@ class TeamConfig(BaseModel):
         return [e.key for e in self.recurring_epics] + list(self.existing_epics.keys())
 
 
-def load_team_config(
-    path: str | Path,
-    *,
-    console: Any = None,
-) -> TeamConfig:
-    """Load and validate a team config from a YAML file.
+def load_team_config(path: str | Path) -> tuple[TeamConfig, object]:
+    """Load and validate a team config; return ``(model, tagged_raw)``.
 
-    After Pydantic validation, applies team-internal ``defaults.fields``
-    to every template's ``fields`` per Phase 2 layered-merge rules
-    (earlier wins on same-key conflicts; lists concat-deduplicate;
-    warnings to stderr).
+    NOTE (Phase 02-02): the team-defaults → template merge is NOT performed
+    here anymore. Callers MUST invoke ``merge_configs(org, team, ...)``
+    (see ``jiramator.config_merge``) to obtain a merged ``TeamConfig`` whose
+    template ``fields`` carry the inherited org/team-default values. Loading
+    without merging yields a ``TeamConfig`` whose template ``fields`` reflect
+    the raw YAML — no inheritance applied.
 
     Args:
-        path:    Path to the team-config YAML file.
-        console: Optional ``rich.console.Console`` to receive merge
-                 conflict warnings. When ``None`` (the default), a
-                 ``Console(stderr=True)`` is instantiated by the loader.
-                 The parameter exists primarily for testability and
-                 future CLI plumbing; pass ``None`` for normal use.
+        path: Path to the team-config YAML file.
+
+    Returns:
+        ``(model, tagged_raw)`` — the validated ``TeamConfig`` and the
+        line-tagged YAML tree (consumed by ``merge_configs`` for
+        conflict-warning line resolution).
 
     Raises:
         ConfigValidationError: For missing files, parse errors,
@@ -528,27 +542,6 @@ def load_team_config(
     path = Path(path)
     clean, tagged = _load_yaml_with_lines(path, kind="Team")
     try:
-        model = TeamConfig(**clean)
+        return TeamConfig(**clean), tagged
     except ValidationError as exc:
         raise _wrap_validation_error(exc, file=path, tagged_raw=tagged) from exc
-
-    # Phase 02-01: apply team-internal defaults into every template's fields.
-    # Local import keeps the import graph trivially obvious (config_merge
-    # already imports from yaml_loader + error_format; config.py importing
-    # from config_merge is safe but the deferred import avoids any future
-    # circular-import surprise).
-    from jiramator.config_merge import merge_team_defaults_into_templates
-
-    warnings = merge_team_defaults_into_templates(
-        team_model=model,
-        team_tagged_raw=tagged,
-        team_file=path,
-    )
-    if warnings:
-        if console is None:
-            from rich.console import Console
-            console = Console(stderr=True)
-        for w in warnings:
-            console.print(str(w), highlight=False, markup=False)
-
-    return model

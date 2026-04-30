@@ -573,8 +573,8 @@ class TestImportCommandFlags:
         from jiramator.config import load_org_config, load_team_config
         from jiramator.run_report import compute_resolved_hash
 
-        org_config = load_org_config(org_config_path)
-        team_config = load_team_config(team_config_path)
+        org_config, _ = load_org_config(org_config_path)
+        team_config, _ = load_team_config(team_config_path)
         current_hash = compute_resolved_hash(org_config, team_config, None, [])
 
         prior = tmp_path / "prior.json"
@@ -631,8 +631,8 @@ class TestImportCommandFlags:
         from jiramator.config import load_org_config, load_team_config
         from jiramator.run_report import compute_resolved_hash
 
-        org_config = load_org_config(org_config_path)
-        team_config = load_team_config(team_config_path)
+        org_config, _ = load_org_config(org_config_path)
+        team_config, _ = load_team_config(team_config_path)
         current_hash = compute_resolved_hash(org_config, team_config, None, [])
 
         prior = tmp_path / "explicit.json"
