@@ -16,6 +16,7 @@ from __future__ import annotations
 from typing import Any
 
 from jiramator.config import OrgConfig, TeamConfig, TicketTemplate, _EPIC_REF_RE, _TEMPLATE_VAR_RE
+from jiramator.yaml_loader import strip_line_markers as _strip_line_markers
 
 # ---------------------------------------------------------------------------
 # Field type wrapping
@@ -37,6 +38,17 @@ WRAPPED_FIELDS: dict[str, str] = {
 # ``labels`` is already a string array in Jira — no wrapping needed.
 # ``project`` is injected by the builder as {"key": "..."}.
 # Custom fields (customfield_*) pass through as-is.
+
+
+def _strip_template_key(payloads: list[dict[str, Any]]) -> None:
+    """Remove ``_template_key`` annotations in place before sending to Jira.
+
+    The annotation is internal metadata for run-report identity (FOUND-02/03).
+    Jira would reject it as an unknown field. Mirrors the ``_sprint_num`` strip
+    pattern in :func:`jiramator.planner._resolve_sprint_ids`.
+    """
+    for p in payloads:
+        p.pop("_template_key", None)
 
 
 def _wrap_field(field_name: str, value: Any) -> Any:
@@ -129,6 +141,11 @@ def _build_fields_payload(
         "summary": resolve_value(summary, variables, epic_keys),
     }
 
+    # Defuse Pitfall 1: line-aware YAML loader injects __line__ on every
+    # parsed mapping; Pydantic dict[str, Any] fields pass it through. Strip
+    # before resolution so it never reaches Jira's REST API.
+    template_fields = _strip_line_markers(template_fields)
+
     for field_name, raw_value in template_fields.items():
         resolved = resolve_value(raw_value, variables, epic_keys)
         fields[field_name] = _wrap_field(field_name, resolved)
@@ -167,6 +184,7 @@ def build_epics(
         fields["issuetype"] = {"name": "Epic"}
         epics.append({
             "ref_key": epic_tmpl.key,
+            "_template_key": f"epic:{epic_tmpl.key}",
             "payload": {"fields": fields},
         })
     return epics
@@ -194,7 +212,7 @@ def build_per_release_tickets(
     tickets = []
     for version in versions:
         version_vars = {**variables, "version": version}
-        for tmpl in team_config.per_release_tickets:
+        for template_idx, tmpl in enumerate(team_config.per_release_tickets):
             fields = _build_fields_payload(
                 tmpl.fields,
                 tmpl.summary,
@@ -206,7 +224,10 @@ def build_per_release_tickets(
             sprint_num = None
             if tmpl.sprint_group and version in team_config.release_sprint_map:
                 sprint_num = team_config.release_sprint_map[version].get(tmpl.sprint_group)
-            ticket: dict[str, Any] = {"fields": fields}
+            ticket: dict[str, Any] = {
+                "fields": fields,
+                "_template_key": f"per_release[{template_idx}]:{version}",
+            }
             if sprint_num is not None:
                 ticket["_sprint_num"] = str(sprint_num)
             tickets.append(ticket)
@@ -272,27 +293,27 @@ def build_per_sprint_tickets(
     for sprint_num in range(1, sprint_cfg.count + 1):
         is_long = sprint_num in long_sprint_set
 
-        for tmpl in team_config.per_sprint_tickets:
+        for template_idx, tmpl in enumerate(team_config.per_sprint_tickets):
             if is_long and tmpl.extra_on_long_sprint > 0:
                 # Long sprint with extras — generate suffixed tickets
                 # e.g. extra_on_long_sprint=1, suffixes=["a","b"] → "6a" and "6b"
                 for suffix in tmpl.long_sprint_suffix:
                     sprint_label = f"{sprint_num}{suffix}"
-                    tickets.append(
-                        _build_sprint_ticket(
-                            tmpl, team_config.project_key,
-                            variables, epic_keys, sprint_label,
-                        )
-                    )
-            else:
-                # Standard sprint or template without extras
-                sprint_label = str(sprint_num)
-                tickets.append(
-                    _build_sprint_ticket(
+                    ticket = _build_sprint_ticket(
                         tmpl, team_config.project_key,
                         variables, epic_keys, sprint_label,
                     )
+                    ticket["_template_key"] = f"per_sprint[{template_idx}]:{sprint_label}"
+                    tickets.append(ticket)
+            else:
+                # Standard sprint or template without extras
+                sprint_label = str(sprint_num)
+                ticket = _build_sprint_ticket(
+                    tmpl, team_config.project_key,
+                    variables, epic_keys, sprint_label,
                 )
+                ticket["_template_key"] = f"per_sprint[{template_idx}]:{sprint_label}"
+                tickets.append(ticket)
 
     return tickets
 

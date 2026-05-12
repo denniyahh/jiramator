@@ -1,0 +1,4 @@
+# Triggers: Pydantic missing-required for project_key on TeamConfig
+# (TeamConfig requires project_key + team_name; this file omits project_key)
+team_name: Calcs
+recurring_epics: []

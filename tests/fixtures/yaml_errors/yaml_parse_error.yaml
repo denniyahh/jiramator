@@ -1,0 +1,5 @@
+# Triggers: yaml.YAMLError with problem_mark on line 3 (unclosed quote).
+# Used to exercise the "YAML parse error" branch of load_team_config.
+project_key: CA
+team_name: "Calcs
+recurring_epics: []

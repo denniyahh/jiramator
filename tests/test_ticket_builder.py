@@ -14,6 +14,7 @@ from jiramator.config import (
 from jiramator.ticket_builder import (
     WRAPPED_FIELDS,
     _build_fields_payload,
+    _strip_template_key,
     _wrap_field,
     build_all,
     build_epics,
@@ -564,3 +565,146 @@ class TestBuildAll:
             versions=[], epic_keys=epic_keys,
         )
         assert result["epics"][0]["payload"]["fields"]["summary"] == "PI28 BAU"
+
+
+# ---------------------------------------------------------------------------
+# _template_key annotation (Plan 01-04)
+# ---------------------------------------------------------------------------
+
+
+class TestTemplateKeyAnnotation:
+    """Plan 01-04 Task 1: every payload carries a deterministic _template_key.
+
+    The annotation is internal metadata for resume identity (FOUND-02/03);
+    it must be stripped before sending to Jira via _strip_template_key.
+    """
+
+    def test_t1_build_epics_annotation(self, org_config, base_vars):
+        """T1: build_epics annotates each entry with epic:<ref_key>."""
+        tc = TeamConfig(
+            project_key="X",
+            team_name="TestTeam",
+            recurring_epics=[
+                EpicTemplate(key="bau", summary="BAU"),
+                EpicTemplate(key="misc", summary="Misc"),
+            ],
+        )
+        epics = build_epics(org_config, tc, base_vars)
+        keys = [e["_template_key"] for e in epics]
+        assert keys == ["epic:bau", "epic:misc"]
+
+    def test_t2_build_per_release_annotation(self, org_config, base_vars, epic_keys):
+        """T2: per_release[<idx>]:<version> across templates × versions."""
+        tc = TeamConfig(
+            project_key="X",
+            team_name="T",
+            per_release_tickets=[
+                TicketTemplate(summary="A {version}", fields={"issuetype": "Task"}),
+                TicketTemplate(summary="B {version}", fields={"issuetype": "Task"}),
+            ],
+        )
+        versions = ["v1", "v2", "v3"]
+        tickets = build_per_release_tickets(org_config, tc, base_vars, versions, epic_keys)
+        keys = [t["_template_key"] for t in tickets]
+        # Outer loop: versions; inner loop: templates
+        assert keys == [
+            "per_release[0]:v1", "per_release[1]:v1",
+            "per_release[0]:v2", "per_release[1]:v2",
+            "per_release[0]:v3", "per_release[1]:v3",
+        ]
+
+    def test_t3_build_per_sprint_annotation_long(
+        self, org_config, team_config, base_vars, epic_keys,
+    ):
+        """T3: per_sprint[<idx>]:<sprint_label> with long-sprint suffix in label."""
+        tickets = build_per_sprint_tickets(
+            org_config, team_config, base_vars, epic_keys,
+        )
+        keys = [t["_template_key"] for t in tickets]
+        # 5 standard sprints + sprint 6 long with 'a' and 'b' suffixes
+        assert keys == [
+            "per_sprint[0]:1",
+            "per_sprint[0]:2",
+            "per_sprint[0]:3",
+            "per_sprint[0]:4",
+            "per_sprint[0]:5",
+            "per_sprint[0]:6a",
+            "per_sprint[0]:6b",
+        ]
+
+    def test_t3b_per_sprint_multiple_templates(self, org_config, base_vars, epic_keys):
+        """Multiple per-sprint templates produce distinct indexed keys."""
+        tc = TeamConfig(
+            project_key="X",
+            team_name="T",
+            per_sprint_tickets=[
+                TicketTemplate(summary="A (Sprint {sprint_num})", fields={"issuetype": "Task"}),
+                TicketTemplate(summary="B (Sprint {sprint_num})", fields={"issuetype": "Task"}),
+            ],
+        )
+        oc = OrgConfig(
+            jira_url="https://example.atlassian.net",
+            custom_fields={},
+            sprints=SprintConfig(
+                count=2, standard_length_weeks=2, long_length_weeks=3, long_sprints=[],
+            ),
+        )
+        tickets = build_per_sprint_tickets(oc, tc, base_vars, epic_keys)
+        keys = [t["_template_key"] for t in tickets]
+        # Outer: sprint, inner: template
+        assert keys == [
+            "per_sprint[0]:1", "per_sprint[1]:1",
+            "per_sprint[0]:2", "per_sprint[1]:2",
+        ]
+
+    def test_t4_build_all_keys_globally_unique(
+        self, org_config, team_config, epic_keys,
+    ):
+        """T4: load-bearing invariant — all _template_keys unique within a run."""
+        result = build_all(
+            org_config, team_config,
+            pi_label="PI28", pi_num="28",
+            versions=["26.1.1", "26.1.2", "26.2.0"],
+            epic_keys=epic_keys,
+        )
+        all_keys = (
+            [e["_template_key"] for e in result["epics"]]
+            + [t["_template_key"] for t in result["per_release"]]
+            + [t["_template_key"] for t in result["per_sprint"]]
+        )
+        assert len(all_keys) == len(set(all_keys)), (
+            f"duplicate _template_key found: {all_keys}"
+        )
+
+    def test_t5_strip_template_key_in_place(self):
+        """T5: _strip_template_key removes annotation in place; rest preserved."""
+        payloads = [
+            {"_template_key": "epic:bau", "fields": {"summary": "x"}},
+            {"_template_key": "per_release[0]:v1", "fields": {"summary": "y"}, "_sprint_num": "3"},
+            {"fields": {"summary": "z"}},  # no annotation — must not crash
+        ]
+        _strip_template_key(payloads)
+        assert "_template_key" not in payloads[0]
+        assert payloads[0]["fields"] == {"summary": "x"}
+        assert "_template_key" not in payloads[1]
+        assert payloads[1]["_sprint_num"] == "3"
+        assert payloads[2] == {"fields": {"summary": "z"}}
+
+    def test_t6_idempotent_keys_across_runs(self, org_config, team_config, epic_keys):
+        """T6: determinism — same inputs produce identical _template_keys."""
+        result_a = build_all(
+            org_config, team_config,
+            pi_label="PI28", pi_num="28",
+            versions=["26.1.1", "26.2.0"],
+            epic_keys=epic_keys,
+        )
+        result_b = build_all(
+            org_config, team_config,
+            pi_label="PI28", pi_num="28",
+            versions=["26.1.1", "26.2.0"],
+            epic_keys=epic_keys,
+        )
+        for category in ("epics", "per_release", "per_sprint"):
+            keys_a = [p["_template_key"] for p in result_a[category]]
+            keys_b = [p["_template_key"] for p in result_b[category]]
+            assert keys_a == keys_b, f"non-deterministic in {category}"
