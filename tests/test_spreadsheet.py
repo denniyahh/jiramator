@@ -257,10 +257,9 @@ class TestEncodingDetection:
         assert "Read" not in captured.err
         assert captured.err == "" or captured.err.isspace()
 
-    def test_N5c_no_announcement_on_utf8_sig(self, capsys):
-        """N5c: utf-8-sig is technically distinct from utf-8, but the user
-        doesn't need to be told about a BOM strip — keep the announcement
-        for the cases where they might want to override (true non-UTF-8).
+    def test_N5c_announces_utf8_sig_encoding(self, capsys):
+        """N5c: utf-8-sig is distinct from utf-8; the announcement IS emitted
+        so the user can see what encoding was detected and override if needed.
         Decision: announce for any non-utf-8 encoding (including utf-8-sig
         and utf-16). This preserves transparency over silence."""
         from jiramator.spreadsheet import read_spreadsheet

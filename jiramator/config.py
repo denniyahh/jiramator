@@ -447,7 +447,7 @@ class TeamConfig(BaseModel):
 
     @field_validator("sprints_exist", mode="before")
     @classmethod
-    def _strict_bool_or_none(cls, v):
+    def _strict_bool_or_none(cls, v: object) -> bool | None:
         """Reject non-bool/non-None values (no string coercion — Plan 02-03 SE5)."""
         if v is None or isinstance(v, bool):
             return v
