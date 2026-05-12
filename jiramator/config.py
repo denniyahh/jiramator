@@ -210,7 +210,7 @@ def _load_yaml_with_lines(path: Path, kind: str) -> tuple[dict[str, Any], object
     and non-mapping document roots.
     """
     try:
-        with open(path) as f:
+        with open(path, encoding="utf-8", errors="strict") as f:
             text = f.read()
     except FileNotFoundError as exc:
         raise ConfigValidationError(
