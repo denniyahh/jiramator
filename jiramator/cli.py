@@ -413,7 +413,7 @@ def import_command(
     # Build a report for live runs (cli owns the lifecycle for import).
     report = RunReport(
         command=list(sys.argv),
-        started_at=datetime.now(timezone.utc).isoformat(),
+        started_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         team_config_path=str(team_config_path.resolve()),
         org_config_path=str(resolved_org_path.resolve()),
         team_name=team_config.team_name,
@@ -438,7 +438,7 @@ def import_command(
         )
     except (ValueError, JiraApiError) as exc:
         # Persist the (possibly partial) report before exiting.
-        report.ended_at = datetime.now(timezone.utc).isoformat()
+        report.ended_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         try:
             write_report_atomic(report, report_path)
         except OSError:
@@ -446,7 +446,7 @@ def import_command(
         _fail(f"Import error: {exc}")
 
     # Finalize report status.
-    report.ended_at = datetime.now(timezone.utc).isoformat()
+    report.ended_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     if report.counts.get("failed", 0) == 0 and report.counts.get("created", 0) > 0:
         report.status = "success"
     elif report.counts.get("created", 0) > 0:
