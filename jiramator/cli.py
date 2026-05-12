@@ -447,9 +447,13 @@ def import_command(
 
     # Finalize report status.
     report.ended_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    if report.counts.get("failed", 0) == 0 and report.counts.get("created", 0) > 0:
+    failed_count = report.counts.get("failed", 0)
+    created_count = report.counts.get("created", 0)
+    skipped_count = report.counts.get("skipped", 0)
+
+    if failed_count == 0:
         report.status = "success"
-    elif report.counts.get("created", 0) > 0:
+    elif created_count > 0 or skipped_count > 0 or failed_count > 0:
         report.status = "partial"
     else:
         report.status = "failed"
