@@ -236,11 +236,16 @@ def _load_yaml_with_lines(path: Path, kind: str) -> tuple[dict[str, Any], object
         problem_mark = getattr(exc, "problem_mark", None)
         if problem_mark is not None:
             line = problem_mark.line + 1
+        detail = str(exc).strip()
+        if detail:
+            reason = f"YAML parse error ({exc.__class__.__name__}): {detail}"
+        else:
+            reason = f"YAML parse error: {exc.__class__.__name__}"
         raise ConfigValidationError(
             file=path,
             line=line,
             field_path="<yaml>",
-            reason=f"YAML parse error: {exc.__class__.__name__}",
+            reason=reason,
         ) from exc
 
     if not isinstance(tagged_raw, dict):
