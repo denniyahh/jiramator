@@ -58,30 +58,33 @@ def _read_xlsx(
     max_rows: int | None = None,
 ) -> list[dict[str, str]]:
     workbook = openpyxl.load_workbook(path, data_only=True, read_only=True)
-    sheet = workbook[sheet_name] if sheet_name else workbook[workbook.sheetnames[0]]
-
-    rows_iter = sheet.iter_rows(values_only=True)
     try:
-        raw_headers = next(rows_iter)
-    except StopIteration:
-        return []
+        sheet = workbook[sheet_name] if sheet_name else workbook[workbook.sheetnames[0]]
 
-    headers = _normalize_headers(list(raw_headers))
-    rows: list[dict[str, str]] = []
-    for row in rows_iter:
-        normalized = {
-            header: _coerce_cell(value)
-            for header, value in zip(headers, row, strict=False)
-        }
-        if len(row) < len(headers):
-            for header in headers[len(row):]:
-                normalized[header] = ""
-        if all(value == "" for value in normalized.values()):
-            continue
-        rows.append(normalized)
-        if max_rows is not None and len(rows) >= max_rows:
-            break
-    return rows
+        rows_iter = sheet.iter_rows(values_only=True)
+        try:
+            raw_headers = next(rows_iter)
+        except StopIteration:
+            return []
+
+        headers = _normalize_headers(list(raw_headers))
+        rows: list[dict[str, str]] = []
+        for row in rows_iter:
+            normalized = {
+                header: _coerce_cell(value)
+                for header, value in zip(headers, row, strict=False)
+            }
+            if len(row) < len(headers):
+                for header in headers[len(row):]:
+                    normalized[header] = ""
+            if all(value == "" for value in normalized.values()):
+                continue
+            rows.append(normalized)
+            if max_rows is not None and len(rows) >= max_rows:
+                break
+        return rows
+    finally:
+        workbook.close()
 
 
 def read_spreadsheet(
