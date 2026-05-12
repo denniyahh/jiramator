@@ -1,0 +1,8 @@
+# Triggers: extra top-level key on TeamConfig.
+# Pydantic default behavior allows extras (extra='ignore'), so this file
+# documents the case but does NOT raise on its own. After Plan 01-01 Task 3
+# A2 sets extra='ignore' on the root models, this file remains useful as a
+# regression fixture (the extra key is silently ignored, the rest still loads).
+project_key: CA
+team_name: Calcs
+totally_unknown_top_level_key: oops

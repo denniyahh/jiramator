@@ -3,8 +3,8 @@
 from jiramator.config import load_org_config, load_team_config
 from jiramator.ticket_builder import build_all
 
-org = load_org_config("configs/org/marketaxess.yaml")
-team = load_team_config("configs/teams/calcs.yaml")
+org, _ = load_org_config("configs/org/marketaxess.yaml")
+team, _ = load_team_config("configs/teams/calcs.yaml")
 
 result = build_all(
     org, team,

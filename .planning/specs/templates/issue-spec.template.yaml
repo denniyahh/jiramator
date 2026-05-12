@@ -1,0 +1,141 @@
+# =============================================================================
+# Jiramator Issue Spec — Draft Template
+# =============================================================================
+#
+# STATUS: Planned, not yet wired to the CLI.
+#
+# This template is part of the planned unified bulk-create architecture.
+# It does NOT correspond to a currently shipped `jiramator create-issues`
+# command yet. Treat it as a design/working template until implementation lands.
+#
+# See also:
+# - .planning/specs/2026-04-22-bulk-create-unified-architecture.md
+# - .planning/specs/archive/2026-04-22-bulk-create-workstreams.md
+#
+# =============================================================================
+# HOW IT WORKS
+# ------------
+# 1. Fill in `meta` (PI label, project key).
+# 2. Set `defaults` — any field here is applied to every issue. You can
+#    override any default on a per-issue basis.
+# 3. List your epics. Each epic has a `key` (existing Jira epic) and an
+#    `issues` list underneath it.
+# 4. Run the command. Issues are created in order, linked to their epic.
+#
+# FIELD NAMES
+# -----------
+# Use the logical names defined in your org config's `custom_fields` block.
+# The CLI resolves logical names → Jira field IDs at runtime, so this file
+# is portable across teams with different field configurations.
+#
+# Standard fields use Jira's native names:
+#   summary       — issue title (required on every issue)
+#   type          — issue type: Story | Task | Bug | Sub-task
+#   story_points  — numeric, decimals OK (e.g. 0.5)
+#   fix_version   — version name exactly as it appears in Jira (e.g. "26.3.0")
+#   priority      — Highest | High | Medium | Low | Lowest (default: Medium)
+#   assignee      — email address or omit for unassigned
+#   description   — plain text or Markdown
+#
+# Custom fields use the logical names from org config `custom_fields`:
+#   api_impact                — "Yes" | "No"
+#   product_horizontals       — single value (e.g. "Calcs")
+#   product_verticals         — list of values (e.g. ["US High Grade", "Data"])
+#   platform                  — list of values (e.g. ["Calcs"])
+#
+# =============================================================================
+
+meta:
+  pi: PI28                    # Used as a label on all issues (set in defaults below)
+  project: CA                 # Jira project key
+
+
+# ---------------------------------------------------------------------------
+# Defaults — applied to every issue unless overridden at the issue level.
+# ---------------------------------------------------------------------------
+defaults:
+  labels:
+    - PI28                    # Keep in sync with meta.pi above
+  api_impact: "No"
+  product_horizontals: "Calcs"
+  product_verticals:
+    - AxessIQ
+    - Data
+    - Emerging Markets
+    - Eurobonds
+    - Munibonds
+    - US High Grade
+    - US High Yield
+  platform:
+    - Calcs
+
+
+# ---------------------------------------------------------------------------
+# Epics and their issues.
+#
+# Each entry is an existing Jira epic. Issues listed under it will be
+# created and linked to that epic via the epic_link field.
+#
+# To put issues under NO epic (not recommended), use key: null
+# ---------------------------------------------------------------------------
+epics:
+
+  - key: CA-1234              # Replace with actual epic key
+    # Optional: a human-readable label — not sent to Jira, just for your reference
+    label: "My Feature Epic"
+    issues:
+
+      - summary: "Example Story — implement the thing"
+        type: Story
+        story_points: 3
+        fix_version: "26.3.0"
+        # All defaults apply. Nothing else needed.
+
+      - summary: "Example Task — validate the thing"
+        type: Task
+        story_points: 2
+        fix_version: "26.3.0"
+        # Override a default for just this issue:
+        priority: High
+
+      - summary: "Example Task — no fix version yet"
+        type: Task
+        story_points: 1
+        # Omit fix_version entirely if not known yet.
+
+      - summary: "Example Story — partial sprint (0.5 SP)"
+        type: Story
+        story_points: 0.5
+        fix_version: "PI28"   # Use PI name as fix version when not tied to a semver
+
+      - summary: "Example Task — with assignee and description"
+        type: Task
+        story_points: 2
+        fix_version: "26.3.0"
+        assignee: "engineer@yourcompany.com"
+        description: |
+          ## Context
+          Brief description of what this task involves.
+
+          ## Acceptance Criteria
+          - [ ] Criterion one
+          - [ ] Criterion two
+
+      - summary: "Example Story — override product verticals"
+        type: Story
+        story_points: 1
+        fix_version: "26.3.0"
+        # Override the default product_verticals for this specific issue:
+        product_verticals:
+          - US High Grade
+          - Eurobonds
+
+
+  - key: CA-5678              # Second epic
+    label: "Another Epic"
+    issues:
+
+      - summary: "Story under second epic"
+        type: Story
+        story_points: 2
+        fix_version: "26.3.0"

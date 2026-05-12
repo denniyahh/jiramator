@@ -13,8 +13,86 @@ jira_token_env: JIRA_TOKEN
 # Mapping of logical names to Jira custom field IDs.
 # Look these up via Jira admin or API: /rest/api/3/field
 custom_fields:
-  story_points: customfield_10026
-  epic_link: customfield_10014
+  sprint_field:         customfield_10021
+  story_points:         customfield_10026
+  epic_link:            customfield_10014
+  api_impact:           customfield_10273
+  product_horizontals:  customfield_12747
+  product_verticals:    customfield_12749
+  platform:             customfield_14823
+  code_complexity:      customfield_11901
+  qa_testing:           customfield_11902
+  risk_impact:          customfield_11904
+  risk_mitigation_score: customfield_11903
+  risk_description:     customfield_11823
+  risk_mitigation_plan: customfield_11760
+  plan_for_risk_mitigation: customfield_12001
+  overall_risk_value:   customfield_11905
+  tech_stack:           customfield_11940
+  repositories:         customfield_11941
+  object_model_changes: customfield_11942
+  database_impact:      customfield_11943
+  requires_load_test:   customfield_11944
+  production_sanity_test_with_release: customfield_12153
+
+bulk_create:
+  field_aliases:
+    type: issuetype
+    fix_version: fixVersions
+    Summary: summary
+    Description: description
+    Issue Type: issuetype
+    Priority: priority
+    Labels: labels
+    Fix Version: fixVersions
+    Fix Versions: fixVersions
+    API Impact: api_impact
+    Product Horizontals: product_horizontals
+    Product Verticals: product_verticals
+    Platform: platform
+    Code Complexity: code_complexity
+    QA Testing: qa_testing
+    QA testing: qa_testing
+    Risk Impact: risk_impact
+    Risk Description: risk_description
+    Risk Mitigation: risk_mitigation_score
+    Plan for Risk Mitigation: plan_for_risk_mitigation
+    Overall Risk Value: overall_risk_value
+    Tech Stack: tech_stack
+    Repositories: repositories
+    Object model changes: object_model_changes
+    Database Impact: database_impact
+    Requires Load Test: requires_load_test
+    Production Sanity Test with Release?: production_sanity_test_with_release
+    Reporter: reporter
+  field_types:
+    issuetype: name_object
+    priority: name_object
+    fixVersions: name_object_array
+    components: name_object_array
+    labels: labels
+    api_impact: multi_select
+    product_horizontals: single_select
+    product_verticals: multi_select
+    platform: multi_select
+    code_complexity: single_select
+    qa_testing: single_select
+    risk_impact: single_select
+    risk_mitigation_score: single_select
+    risk_description: adf_text
+    risk_mitigation_plan: adf_text
+    plan_for_risk_mitigation: adf_text
+    overall_risk_value: number
+    tech_stack: adf_text
+    repositories: adf_text
+    object_model_changes: single_select
+    database_impact: single_select
+    requires_load_test: single_select
+    production_sanity_test_with_release: single_select
+  defaults:
+    issuetype: Risk
+  auto_lookup_unknown_fields: true
+  multi_value_delimiter: ","
 
 # PI sprint cadence
 sprints:

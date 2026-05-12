@@ -8,7 +8,10 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field, HttpUrl, field_validator, model_validator
+from pydantic import BaseModel, Field, HttpUrl, ValidationError, field_validator, model_validator
+
+from jiramator.error_format import ConfigValidationError, did_you_mean, format_loc
+from jiramator.yaml_loader import LINE_KEY, resolve_line, safe_load_with_lines, strip_line_markers
 
 # Known template variables that can appear in {brackets} in config strings.
 # The ticket builder will provide concrete values for these at runtime.
@@ -57,6 +60,31 @@ class SprintConfig(BaseModel):
         return v
 
 
+class BulkCreateConfig(BaseModel):
+    """Shared config for ad-hoc bulk issue creation inputs and coercion."""
+
+    field_aliases: dict[str, str] = Field(
+        default_factory=dict,
+        description="Maps source-facing field names/headers to logical field names",
+    )
+    field_types: dict[str, str] = Field(
+        default_factory=dict,
+        description="Maps logical or Jira field names to coercion types",
+    )
+    defaults: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Default field values applied by bulk-create workflows",
+    )
+    auto_lookup_unknown_fields: bool = Field(
+        default=True,
+        description="Whether to use Jira field metadata to resolve unknown fields",
+    )
+    multi_value_delimiter: str = Field(
+        default=",",
+        description="Delimiter for splitting multi-value fields from string inputs",
+    )
+
+
 class OrgConfig(BaseModel):
     """Organization-level configuration — Jira instance, custom fields, sprint structure."""
 
@@ -72,6 +100,22 @@ class OrgConfig(BaseModel):
     custom_fields: dict[str, str] = Field(
         default_factory=dict,
         description="Mapping of logical field names to Jira custom field IDs",
+    )
+    bulk_create: BulkCreateConfig = Field(
+        default_factory=BulkCreateConfig,
+        description="Shared config for ad-hoc bulk issue creation workflows",
+    )
+    default_fields: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Locked fields applied to every issue created via `plan` (epics, "
+            "per-release tickets, per-sprint tickets) under any team config in "
+            "this org. Keys mirror the Jira `fields:` shape on templates "
+            "(logical names like `priority` or direct Jira keys like "
+            "`customfield_10273`). Same-name keys in team `defaults:` or "
+            "template `fields:` are warned and dropped at config-load time. "
+            "Phase 2: NOT applied to the `import` command path; see importer.py."
+        ),
     )
     sprints: SprintConfig = Field(description="Sprint cadence configuration")
 
@@ -117,19 +161,125 @@ class OrgConfig(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def load_org_config(path: str | Path) -> OrgConfig:
-    """Load and validate an org config from a YAML file."""
+def _wrap_validation_error(
+    exc: ValidationError,
+    *,
+    file: Path,
+    tagged_raw: object,
+    known_template_vars: frozenset[str] = KNOWN_TEMPLATE_VARS,
+) -> ConfigValidationError:
+    """Convert the first error in a Pydantic ``ValidationError`` to a
+    ``ConfigValidationError`` enriched with line + did-you-mean."""
+    first = exc.errors()[0]
+    loc = first["loc"]
+    msg = first["msg"]
+    line = resolve_line(tagged_raw, loc)
+    field_path = format_loc(loc) or "<root>"
+
+    # Heuristic: if the failing message mentions an unknown template variable,
+    # mine the offender out and propose a close match from KNOWN_TEMPLATE_VARS.
+    suggestion: str | None = None
+    if "Unknown template variable" in msg:
+        # Format from _validate_template_vars:
+        #   "Unknown template variable(s) in <ctx>: <names>. Known variables: ..."
+        try:
+            after = msg.split("Unknown template variable(s) in", 1)[1]
+            names_part = after.split(":", 1)[1].split(".", 1)[0]
+            offenders = [n.strip() for n in names_part.split(",") if n.strip()]
+            if offenders:
+                # Suggest for the first offender — the typical case is one typo.
+                suggestion = did_you_mean(offenders[0], sorted(known_template_vars))
+        except (IndexError, ValueError):
+            suggestion = None
+
+    return ConfigValidationError(
+        file=file,
+        line=line,
+        field_path=field_path,
+        reason=msg,
+        suggestion=suggestion,
+    )
+
+
+def _load_yaml_with_lines(path: Path, kind: str) -> tuple[dict[str, Any], object]:
+    """Open ``path`` and parse it with the line-aware loader.
+
+    Returns ``(clean_dict_for_pydantic, tagged_raw_for_line_resolution)``.
+
+    Raises ``ConfigValidationError`` for: file-not-found, YAML parse errors,
+    and non-mapping document roots.
+    """
+    try:
+        with open(path, encoding="utf-8", errors="strict") as f:
+            text = f.read()
+    except FileNotFoundError as exc:
+        raise ConfigValidationError(
+            file=path,
+            line=None,
+            field_path="<file>",
+            reason=f"{kind} config not found: {path}",
+        ) from exc
+    except OSError as exc:
+        raise ConfigValidationError(
+            file=path,
+            line=None,
+            field_path="<file>",
+            reason=f"Cannot read {kind} config: {exc}",
+        ) from exc
+
+    try:
+        tagged_raw = safe_load_with_lines(text)
+    except yaml.YAMLError as exc:
+        # Most YAMLError subclasses (ScannerError, ParserError, etc.) carry
+        # a problem_mark with a 0-indexed .line attribute.
+        line: int | None = None
+        problem_mark = getattr(exc, "problem_mark", None)
+        if problem_mark is not None:
+            line = problem_mark.line + 1
+        detail = str(exc).strip()
+        if detail:
+            reason = f"YAML parse error ({exc.__class__.__name__}): {detail}"
+        else:
+            reason = f"YAML parse error: {exc.__class__.__name__}"
+        raise ConfigValidationError(
+            file=path,
+            line=line,
+            field_path="<yaml>",
+            reason=reason,
+        ) from exc
+
+    if not isinstance(tagged_raw, dict):
+        raise ConfigValidationError(
+            file=path,
+            line=1,
+            field_path="<root>",
+            reason=(
+                f"{kind} config must be a YAML mapping, "
+                f"got {type(tagged_raw).__name__}"
+            ),
+        )
+
+    clean = strip_line_markers(tagged_raw)
+    return clean, tagged_raw
+
+
+def load_org_config(path: str | Path) -> tuple[OrgConfig, object]:
+    """Load and validate an org config from a YAML file.
+
+    Returns the validated model AND the line-tagged raw tree (the latter is
+    consumed by Phase 2 ``merge_configs`` to resolve line numbers when
+    emitting org-vs-team conflict warnings).
+
+    Raises ``ConfigValidationError`` for missing files, parse errors,
+    non-mapping roots, and Pydantic validation failures (with file:line
+    pinpointing and did-you-mean suggestions where applicable).
+    """
     path = Path(path)
-    if not path.exists():
-        raise FileNotFoundError(f"Org config not found: {path}")
-
-    with open(path) as f:
-        raw = yaml.safe_load(f)
-
-    if not isinstance(raw, dict):
-        raise ValueError(f"Org config must be a YAML mapping, got {type(raw).__name__}")
-
-    return OrgConfig(**raw)
+    clean, tagged = _load_yaml_with_lines(path, kind="Org")
+    try:
+        return OrgConfig(**clean), tagged
+    except ValidationError as exc:
+        raise _wrap_validation_error(exc, file=path, tagged_raw=tagged) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -246,6 +396,29 @@ class TicketTemplate(BaseModel):
         return self
 
 
+class TeamDefaults(BaseModel):
+    """Per-team baseline ``fields`` block, merged into every template
+    (recurring_epics, per_release_tickets, per_sprint_tickets) under this
+    team config at load time.
+
+    Same-name keys in template ``fields:`` are warned and dropped at load
+    time — no override mechanism (Phase 2 CONTEXT G-1, "locked is locked").
+
+    Future-proofing: the wrapper sub-model (rather than a bare
+    ``dict[str, Any]``) leaves room to add other shared template defaults
+    (e.g. ``summary_prefix``) without restructuring.
+    """
+
+    fields: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Locked fields applied to every template in this team config. "
+            "Same-name keys in template fields are warned and dropped at "
+            "load time."
+        ),
+    )
+
+
 class TeamConfig(BaseModel):
     """Team-level configuration — project key, epics, ticket templates."""
 
@@ -259,10 +432,41 @@ class TeamConfig(BaseModel):
         default=None,
         description="Sprint name pattern for matching (e.g. 'CA Sprint {pi_num}.{sprint_num}')",
     )
+    sprints_exist: bool | None = Field(
+        default=None,
+        description=(
+            "Whether sprints for the PI already exist in Jira at `plan` time. "
+            "Tri-state: `None` (default) means 'ask interactively when running on a "
+            "TTY, error on non-TTY'; `True` means resolve sprints; `False` means "
+            "skip sprint resolution entirely (no Jira board API call). The CLI flag "
+            "`--sprints-exist / --no-sprints-exist` overrides this field at runtime. "
+            "When set to `False`, no Jira sprint API call is made even if `board_id` "
+            "is configured (Plan 02-03, DC-8)."
+        ),
+    )
+
+    @field_validator("sprints_exist", mode="before")
+    @classmethod
+    def _strict_bool_or_none(cls, v: object) -> bool | None:
+        """Reject non-bool/non-None values (no string coercion — Plan 02-03 SE5)."""
+        if v is None or isinstance(v, bool):
+            return v
+        raise ValueError(
+            f"sprints_exist must be a boolean or null, got {type(v).__name__}: {v!r}"
+        )
     release_sprint_map: dict[str, dict[str, int]] = Field(
         default_factory=dict,
         description="Maps version → {sprint_group: sprint_number} for per-release sprint assignment. "
                     "e.g. {'26.2.1': {'pre': 2, 'post': 3}}",
+    )
+
+    defaults: TeamDefaults = Field(
+        default_factory=TeamDefaults,
+        description=(
+            "Team-internal default fields merged into all templates in "
+            "this team config (recurring_epics, per_release_tickets, "
+            "per_sprint_tickets). Locked at load time per Phase 2 G-1."
+        ),
     )
 
     existing_epics: dict[str, str] = Field(
@@ -338,16 +542,33 @@ class TeamConfig(BaseModel):
         return [e.key for e in self.recurring_epics] + list(self.existing_epics.keys())
 
 
-def load_team_config(path: str | Path) -> TeamConfig:
-    """Load and validate a team config from a YAML file."""
+def load_team_config(path: str | Path) -> tuple[TeamConfig, object]:
+    """Load and validate a team config; return ``(model, tagged_raw)``.
+
+    NOTE (Phase 02-02): the team-defaults → template merge is NOT performed
+    here anymore. Callers MUST invoke ``merge_configs(org, team, ...)``
+    (see ``jiramator.config_merge``) to obtain a merged ``TeamConfig`` whose
+    template ``fields`` carry the inherited org/team-default values. Loading
+    without merging yields a ``TeamConfig`` whose template ``fields`` reflect
+    the raw YAML — no inheritance applied.
+
+    Args:
+        path: Path to the team-config YAML file.
+
+    Returns:
+        ``(model, tagged_raw)`` — the validated ``TeamConfig`` and the
+        line-tagged YAML tree (consumed by ``merge_configs`` for
+        conflict-warning line resolution).
+
+    Raises:
+        ConfigValidationError: For missing files, parse errors,
+            non-mapping roots, and Pydantic validation failures (with
+            file:line pinpointing and did-you-mean suggestions for
+            typo'd template variables).
+    """
     path = Path(path)
-    if not path.exists():
-        raise FileNotFoundError(f"Team config not found: {path}")
-
-    with open(path) as f:
-        raw = yaml.safe_load(f)
-
-    if not isinstance(raw, dict):
-        raise ValueError(f"Team config must be a YAML mapping, got {type(raw).__name__}")
-
-    return TeamConfig(**raw)
+    clean, tagged = _load_yaml_with_lines(path, kind="Team")
+    try:
+        return TeamConfig(**clean), tagged
+    except ValidationError as exc:
+        raise _wrap_validation_error(exc, file=path, tagged_raw=tagged) from exc
