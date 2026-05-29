@@ -40,9 +40,9 @@ if TYPE_CHECKING:  # avoid an import cycle if config ever pulls run_report
 SCHEMA_VERSION: int = 1
 RUNS_DIR: Path = Path(".jiramator/runs")
 
-IssueStatus = Literal["created", "skipped", "failed", "pending"]
+IssueStatus = Literal["created", "updated", "skipped", "failed", "pending"]
 RunStatus = Literal["success", "partial", "failed"]
-IssueKind = Literal["epic", "per_release", "per_sprint", "imported"]
+IssueKind = Literal["epic", "per_release", "per_sprint", "imported", "updated"]
 
 
 # ---------------------------------------------------------------------------
@@ -77,6 +77,7 @@ class IssueResult:
     status: IssueStatus
     jira_key: str | None = None
     error: str | None = None
+    fields: list[str] = field(default_factory=list)
 
 
 @dataclass

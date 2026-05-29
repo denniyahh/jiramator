@@ -32,6 +32,9 @@ Thumbs.db
 # Secrets
 .envrc
 
+# Local organization-specific Jira config
+configs/org/
+
 # Hermes agent state (not part of the project)
 .hermes/
 

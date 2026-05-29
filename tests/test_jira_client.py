@@ -484,3 +484,43 @@ class TestErrorHandling:
         err = exc_info.value
         assert err.status_code == 400
         assert "customfield_10026" in err.errors
+
+
+# ---------------------------------------------------------------------------
+# update_issue
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateIssue:
+    def test_204_success(self, client: JiraClient) -> None:
+        client._session.put = MagicMock(
+            return_value=_mock_response(204, None)
+        )
+        # Should not raise
+        client.update_issue("CA-100", {"fields": {"customfield_14823": [{"value": "Calcs"}]}})
+        client._session.put.assert_called_once()
+        url = client._session.put.call_args[0][0]
+        assert "/rest/api/3/issue/CA-100" in url
+
+    def test_404_raises(self, client: JiraClient) -> None:
+        client._session.put = MagicMock(
+            return_value=_mock_response(404, {})
+        )
+        with pytest.raises(JiraApiError, match="Not found"):
+            client.update_issue("CA-999", {"fields": {}})
+
+    def test_403_raises(self, client: JiraClient) -> None:
+        client._session.put = MagicMock(
+            return_value=_mock_response(403, {})
+        )
+        with pytest.raises(JiraApiError, match="Permission denied"):
+            client.update_issue("CA-100", {"fields": {}})
+
+    def test_sends_correct_payload(self, client: JiraClient) -> None:
+        client._session.put = MagicMock(
+            return_value=_mock_response(204, None)
+        )
+        payload = {"fields": {"customfield_12747": {"value": "Calcs"}}}
+        client.update_issue("CA-42", payload)
+        call_kwargs = client._session.put.call_args[1]
+        assert call_kwargs["json"] == payload

@@ -28,6 +28,7 @@ from jiramator.jira_client import JiraApiError, JiraClient
 from jiramator.planner import run_plan
 from jiramator.run_report import (
     ConfigDriftError,
+    IssueResult,
     RunReport,
     compute_resolved_hash,
     default_report_path,
@@ -35,6 +36,13 @@ from jiramator.run_report import (
     write_report_atomic,
 )
 from jiramator.spreadsheet import read_spreadsheet
+from jiramator.updater import (
+    UpdateRunResult,
+    render_update_execution_report,
+    render_update_preview_report,
+    run_update,
+    validate_unique_issue_keys,
+)
 
 console = Console(stderr=True)
 
@@ -125,6 +133,85 @@ def _load_prior_report(
             )
         return _load_report_file(candidate)
     return _load_report_file(Path(resume_arg))
+
+
+def _update_report_from_result(
+    result: UpdateRunResult,
+    *,
+    command: list[str],
+    started_at: str,
+    ended_at: str,
+    spreadsheet_path: Path,
+    org_config_path: Path,
+) -> RunReport:
+    """Build a persistent run report for a bulk-update result."""
+    updated_fields_by_row: dict[int, list[str]] = {}
+    for row_result in result.preview.row_results:
+        if row_result.payload is None:
+            continue
+        updated_fields_by_row[row_result.row_number] = sorted(
+            row_result.payload.get("fields", {}).keys()
+        )
+
+    report = RunReport(
+        command=command,
+        started_at=started_at,
+        ended_at=ended_at,
+        team_config_path=str(spreadsheet_path.resolve()),
+        org_config_path=str(org_config_path.resolve()),
+        team_name=f"update:{spreadsheet_path.stem}",
+        pi_label=None,
+        versions=[],
+        resolved_config_hash="",
+        status="failed",
+        counts={
+            "updated": len(result.updated),
+            "skipped": len(result.skipped),
+            "failed": len(result.failed),
+        },
+    )
+
+    for row_number, issue_key in result.updated:
+        report.issues.append(
+            IssueResult(
+                template_key=f"row-{row_number}",
+                kind="updated",
+                status="updated",
+                jira_key=issue_key,
+                fields=updated_fields_by_row.get(row_number, []),
+            )
+        )
+    for row_number, issue_key, reason in result.skipped:
+        report.issues.append(
+            IssueResult(
+                template_key=f"row-{row_number}",
+                kind="updated",
+                status="skipped",
+                jira_key=issue_key or None,
+                error=reason,
+                fields=updated_fields_by_row.get(row_number, []),
+            )
+        )
+    for row_number, issue_key, error in result.failed:
+        report.issues.append(
+            IssueResult(
+                template_key=f"row-{row_number}",
+                kind="updated",
+                status="failed",
+                jira_key=issue_key or None,
+                error=error,
+                fields=updated_fields_by_row.get(row_number, []),
+            )
+        )
+
+    if len(result.failed) == 0:
+        report.status = "success"
+    elif len(result.updated) > 0 or len(result.skipped) > 0:
+        report.status = "partial"
+    else:
+        report.status = "failed"
+
+    return report
 
 
 @click.group()
@@ -461,5 +548,161 @@ def import_command(
 
     console.print(render_preview_report(result.preview, preview_rows=preview_rows))
     console.print(render_import_execution_report(result))
+    if result.failed:
+        sys.exit(1)
+
+
+@cli.command(name="update")
+@click.option(
+    "--org-config",
+    "-o",
+    "org_config_path",
+    type=click.Path(exists=True, path_type=Path),
+    default=Path("./configs/org/"),
+    show_default=True,
+    help="Path to org config file or directory containing one.",
+)
+@click.option(
+    "--key-column",
+    type=str,
+    default="Key",
+    show_default=True,
+    help="Spreadsheet column header that contains the Jira issue key.",
+)
+@click.option(
+    "--sheet-name",
+    type=str,
+    default=None,
+    help="Optional worksheet name for XLSX inputs.",
+)
+@click.option(
+    "--dry-run",
+    "-n",
+    is_flag=True,
+    default=False,
+    help="Preview update payloads and exit without modifying issues.",
+)
+@click.option(
+    "--max-rows",
+    type=int,
+    default=None,
+    help="Limit the number of spreadsheet rows read.",
+)
+@click.option(
+    "--preview-rows",
+    type=int,
+    default=5,
+    show_default=True,
+    help="Number of rows to include in preview output.",
+)
+@click.option(
+    "--encoding",
+    "encoding_override",
+    type=click.STRING,
+    default=None,
+    help="Force a specific encoding for CSV reads (bypasses auto-detection).",
+)
+@click.option(
+    "--report",
+    "report_path",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Path to write run report. Default: .jiramator/runs/<UTC>-<spreadsheet>.json",
+)
+@click.argument("spreadsheet_path", type=click.Path(exists=True, path_type=Path))
+def update_command(
+    org_config_path: Path,
+    key_column: str,
+    sheet_name: str | None,
+    dry_run: bool,
+    max_rows: int | None,
+    preview_rows: int,
+    encoding_override: str | None,
+    report_path: Path | None,
+    spreadsheet_path: Path,
+) -> None:
+    """Bulk-update existing Jira issues from a CSV or XLSX spreadsheet.
+
+    The spreadsheet must have a key column (default: 'Key') containing Jira
+    issue keys (e.g. CA-4646).  All other columns are resolved to Jira fields
+    using org config aliases and updated on the corresponding issue.
+
+    Blank cells mean 'no change' — they are omitted from the update payload
+    and will NOT clear the existing Jira field value.
+    """
+    try:
+        resolved_org_path = _resolve_org_config_path(org_config_path)
+        org_config, _ = load_org_config(resolved_org_path)
+    except ConfigValidationError as exc:
+        _fail(str(exc))
+    except (click.BadParameter, FileNotFoundError, ValueError) as exc:
+        _fail(f"Org config error: {exc}")
+
+    try:
+        rows = read_spreadsheet(
+            spreadsheet_path,
+            sheet_name=sheet_name,
+            max_rows=max_rows,
+            encoding_override=encoding_override,
+        )
+    except (ValueError, KeyError) as exc:
+        _fail(f"Spreadsheet error: {exc}")
+
+    if not rows:
+        console.print("[yellow]No rows found in spreadsheet.[/]")
+        return
+
+    try:
+        validate_unique_issue_keys(rows, key_column=key_column)
+    except ValueError as exc:
+        _fail(str(exc))
+
+    if report_path is None:
+        report_path = default_report_path(spreadsheet_path)
+
+    if dry_run:
+        try:
+            client = JiraClient(org_config)
+            jira_fields = client.get_fields()
+            result = run_update(
+                rows,
+                key_column=key_column,
+                org_config=org_config,
+                jira_fields=jira_fields,
+                client=None,
+                dry_run=True,
+            )
+        except (ValueError, JiraApiError) as exc:
+            _fail(f"Update dry-run error: {exc}")
+        console.print(render_update_preview_report(result.preview, preview_rows=preview_rows))
+        return
+
+    started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    try:
+        client = JiraClient(org_config)
+        jira_fields = client.get_fields()
+        result = run_update(
+            rows,
+            key_column=key_column,
+            org_config=org_config,
+            jira_fields=jira_fields,
+            client=client,
+        )
+    except (ValueError, JiraApiError) as exc:
+        _fail(f"Update error: {exc}")
+
+    ended_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    report = _update_report_from_result(
+        result,
+        command=list(sys.argv),
+        started_at=started_at,
+        ended_at=ended_at,
+        spreadsheet_path=spreadsheet_path,
+        org_config_path=resolved_org_path,
+    )
+    write_report_atomic(report, report_path)
+
+    console.print(render_update_preview_report(result.preview, preview_rows=preview_rows))
+    console.print(render_update_execution_report(result))
     if result.failed:
         sys.exit(1)

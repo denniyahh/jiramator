@@ -248,6 +248,25 @@ class JiraClient:
 
         return users[0].get("accountId")
 
+    def update_issue(self, issue_key: str, payload: dict[str, Any]) -> None:
+        """Update an existing Jira issue.
+
+        Args:
+            issue_key: The Jira issue key to update (e.g. "CA-4646").
+            payload: A ``{"fields": {...}}`` dict with only the fields to change.
+
+        Raises:
+            JiraApiError: On any API error.
+        """
+        response = self._session.put(
+            self._url(f"/rest/api/3/issue/{issue_key}"),
+            json=payload,
+            timeout=_DEFAULT_TIMEOUT,
+        )
+        if not response.ok:
+            self._handle_error(response, f"updating issue '{issue_key}'")
+        logger.info("Updated issue %s", issue_key)
+
     def create_issue(self, payload: dict[str, Any]) -> str:
         """Create a single Jira issue.
 
