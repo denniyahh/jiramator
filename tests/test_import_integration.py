@@ -1,4 +1,4 @@
-"""Integration tests for spreadsheet import using real shipped configs."""
+"""Integration tests for spreadsheet import using shipped example configs."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -11,7 +11,7 @@ from jiramator.importer import run_import
 from jiramator.spreadsheet import read_spreadsheet
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-_ORG_CONFIG_PATH = _REPO_ROOT / "configs" / "org" / "marketaxess.yaml"
+_ORG_CONFIG_PATH = _REPO_ROOT / "configs" / "org.example" / "example.yaml"
 _TEAM_CONFIG_PATH = _REPO_ROOT / "configs" / "teams" / "calcs.yaml"
 
 

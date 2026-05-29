@@ -36,8 +36,9 @@ export JIRA_TOKEN="your-jira-api-token"
 Copy the example configs and edit them for your organization and team:
 
 ```bash
-cp configs/org/marketaxess.yaml  configs/org/mycompany.yaml
-cp configs/teams/calcs.yaml      configs/teams/myteam.yaml
+mkdir -p configs/org
+cp configs/org.example/example.yaml  configs/org/mycompany.yaml
+cp configs/teams/calcs.yaml          configs/teams/myteam.yaml
 ```
 
 See [Config Reference](#config-reference) below for the full schema.
@@ -235,10 +236,10 @@ Jiramator uses a two-tier configuration model:
 | `sprints.long_length_weeks` | int | **yes** | Length of extended sprints in weeks |
 | `sprints.long_sprints` | list[int] | no | Which sprint numbers are long (1-indexed) |
 
-**Example** (`configs/org/marketaxess.yaml`):
+**Example** (`configs/org.example/example.yaml`):
 
 ```yaml
-jira_url: https://marketaxess.atlassian.net
+jira_url: https://example.atlassian.net
 
 jira_email_env: JIRA_EMAIL
 jira_token_env: JIRA_TOKEN

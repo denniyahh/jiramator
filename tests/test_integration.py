@@ -1,4 +1,4 @@
-"""Integration tests — load real MarketAxess/Calcs configs and verify end-to-end.
+"""Integration tests — load shipped example/Calcs configs and verify end-to-end.
 
 These tests load the actual YAML config files shipped in configs/ and run the
 ticket builder against them. No mocking of config models — the real parse +
@@ -26,7 +26,7 @@ from jiramator.ticket_builder import build_all, build_epics
 # Paths
 # ---------------------------------------------------------------------------
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-_ORG_CONFIG_PATH = _REPO_ROOT / "configs" / "org" / "marketaxess.yaml"
+_ORG_CONFIG_PATH = _REPO_ROOT / "configs" / "org.example" / "example.yaml"
 _TEAM_CONFIG_PATH = _REPO_ROOT / "configs" / "teams" / "calcs.yaml"
 
 # ---------------------------------------------------------------------------
@@ -47,7 +47,7 @@ EPIC_KEYS = {"bau": "CA-9001", "misc": "CA-9002"}
 
 @pytest.fixture(scope="module")
 def org_config():
-    """Load the real MarketAxess org config."""
+    """Load the example org config."""
     cfg, _ = load_org_config(_ORG_CONFIG_PATH)
     return cfg
 
@@ -78,10 +78,10 @@ def all_payloads(org_config, team_config):
 
 
 class TestConfigLoading:
-    """Verify the real YAML files parse and validate without error."""
+    """Verify the shipped YAML files parse and validate without error."""
 
     def test_org_config_loads(self, org_config):
-        assert str(org_config.jira_url) == "https://marketaxess.atlassian.net/"
+        assert str(org_config.jira_url) == "https://example.atlassian.net/"
         assert org_config.custom_fields["story_points"] == "customfield_10026"
         assert org_config.custom_fields["epic_link"] == "customfield_10014"
 

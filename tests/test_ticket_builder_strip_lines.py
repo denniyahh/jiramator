@@ -172,7 +172,7 @@ def test_S4_build_all_on_real_calcs_config_emits_no_marker():
     from jiramator.config import load_org_config, load_team_config
 
     repo_root = Path(__file__).resolve().parent.parent
-    org_path = repo_root / "configs" / "org" / "marketaxess.yaml"
+    org_path = repo_root / "configs" / "org.example" / "example.yaml"
     team_path = repo_root / "configs" / "teams" / "calcs.yaml"
     if not org_path.exists() or not team_path.exists():
         pytest.skip("Shipped configs not present in this checkout")

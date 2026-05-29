@@ -1,9 +1,8 @@
-# MarketAxess org-level Jiramator configuration
+# Example org-level Jiramator configuration
 #
-# Shared across all teams. Defines the Jira instance,
-# custom field IDs, and sprint cadence.
+# Copy this file into configs/org/ and edit it for your Jira instance.
 
-jira_url: https://marketaxess.atlassian.net
+jira_url: https://example.atlassian.net
 
 # Environment variable names — jiramator reads credentials from these
 # at runtime. Never store secrets in config files.
@@ -50,6 +49,8 @@ bulk_create:
     Product Horizontals: product_horizontals
     Product Verticals: product_verticals
     Platform: platform
+    Horizontal: product_horizontals
+    Vertical: product_verticals
     Code Complexity: code_complexity
     QA Testing: qa_testing
     QA testing: qa_testing
@@ -99,4 +100,4 @@ sprints:
   count: 6
   standard_length_weeks: 2
   long_length_weeks: 3
-  long_sprints: [6]  # Sprint 6 is 3 weeks
+  long_sprints: [6]

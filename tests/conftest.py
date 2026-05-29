@@ -10,8 +10,8 @@ CONFIGS_DIR = Path(__file__).parent.parent / "configs"
 
 @pytest.fixture
 def org_config_path():
-    """Path to the MarketAxess org config."""
-    return CONFIGS_DIR / "org" / "marketaxess.yaml"
+    """Path to the example org config."""
+    return CONFIGS_DIR / "org.example" / "example.yaml"
 
 
 @pytest.fixture

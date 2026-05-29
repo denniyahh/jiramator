@@ -26,7 +26,7 @@ from pydantic import ValidationError
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 CONFIGS_DIR = Path(__file__).parent.parent / "configs"
-ORG_CONFIG_PATH = CONFIGS_DIR / "org" / "marketaxess.yaml"
+ORG_CONFIG_PATH = CONFIGS_DIR / "org.example" / "example.yaml"
 TEAM_CONFIG_PATH = CONFIGS_DIR / "teams" / "calcs.yaml"
 
 
@@ -304,12 +304,12 @@ class TestLoadOrgConfig:
         with pytest.raises(ConfigValidationError, match="YAML mapping"):
             load_org_config(p)
 
-    def test_load_real_marketaxess_config(self) -> None:
-        """Verify the shipped MarketAxess config loads and validates."""
+    def test_load_example_org_config(self) -> None:
+        """Verify the shipped example org config loads and validates."""
         if not ORG_CONFIG_PATH.exists():
-            pytest.skip("MarketAxess config not present")
+            pytest.skip("Example org config not present")
         cfg, _ = load_org_config(ORG_CONFIG_PATH)
-        assert str(cfg.jira_url) == "https://marketaxess.atlassian.net/"
+        assert str(cfg.jira_url) == "https://example.atlassian.net/"
         assert cfg.custom_fields["story_points"] == "customfield_10026"
         assert cfg.custom_fields["epic_link"] == "customfield_10014"
         assert cfg.custom_fields["api_impact"] == "customfield_10273"
@@ -1088,10 +1088,10 @@ class TestOrgDefaultFields:
             load_org_config(p)
         assert "default_fields" in exc.value.field_path
 
-    def test_o6_existing_marketaxess_yaml_unchanged(self) -> None:
-        """O6: real-world marketaxess.yaml (no default_fields) loads with empty."""
+    def test_o6_existing_example_yaml_unchanged(self) -> None:
+        """O6: shipped example org config (no default_fields) loads with empty."""
         if not ORG_CONFIG_PATH.exists():
-            pytest.skip("Marketaxess org config not present")
+            pytest.skip("Example org config not present")
         cfg, _ = load_org_config(ORG_CONFIG_PATH)
         assert cfg.default_fields == {}
 

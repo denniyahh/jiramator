@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from jiramator.config import OrgConfig, TeamConfig
-from jiramator.field_resolver import ResolvedField, resolve_field_name
+from jiramator.field_resolver import ResolvedField, build_and_coerce_field_value, resolve_field_name
 from jiramator.jira_client import JiraApiError, JiraClient
 from jiramator.run_report import IssueResult, RunReport, write_report_atomic
 from jiramator.value_coercion import coerce_field_value, should_omit_value
@@ -79,18 +79,9 @@ def _build_resolved_value(
     *,
     jira_fields: list[dict[str, Any]] | None = None,
 ) -> tuple[ResolvedField, Any]:
-    effective_jira_fields = jira_fields if org_config.bulk_create.auto_lookup_unknown_fields else None
-    resolved = resolve_field_name(source_header, org_config, jira_fields=effective_jira_fields)
-    if resolved.jira_field is None:
-        return resolved, None
-
-    if resolved.logical_name in org_config.bulk_create.field_types:
-        coercion_key = resolved.logical_name
-    else:
-        coercion_key = resolved.jira_field
-
-    coerced = coerce_field_value(coercion_key, raw_value, org_config.bulk_create)
-    return resolved, coerced
+    return build_and_coerce_field_value(
+        source_header, raw_value, org_config, jira_fields=jira_fields,
+    )
 
 
 def _apply_defaults(
