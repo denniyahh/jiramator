@@ -67,10 +67,11 @@ The `plan` command walks you through an interactive flow:
 
 ## Commands
 
-Jiramator currently ships two CLI workflows:
+Jiramator ships three CLI workflows:
 
 - `plan` — interactive PI planning for recurring epics, per-release tickets, and per-sprint tickets
 - `import` — CSV/XLSX spreadsheet import for ad-hoc issue creation
+- `update` — CSV/XLSX spreadsheet bulk-update of existing Jira issues
 
 ### `plan`
 
@@ -133,7 +134,7 @@ The import workflow is intentionally conservative:
 7. In live mode, fetch Jira field metadata, skip duplicates by exact summary within the configured project, then create issues row by row
 8. Continue after per-row Jira API failures and report created/skipped/failed rows at the end
 
-This is not an upsert engine. It does not update existing issues.
+This is not an upsert engine. Use the `update` command to modify existing issues.
 
 ### Column resolution order
 
@@ -194,11 +195,58 @@ Before live creation, Jiramator queries Jira for existing issues with matching s
 
 This is a safety feature, not a perfect dedupe system. If two distinct issues legitimately share a summary, the current workflow will treat them as duplicates.
 
+### `update`
+
+Use `update` to bulk-modify fields on existing Jira issues.
+
+```bash
+# Dry run — resolve columns, build payloads, print preview, no Jira writes
+jiramator update --org-config configs/org/mycompany.yaml \
+                 --dry-run \
+                 ~/updates.xlsx
+
+# Live run — update issues row by row
+jiramator update --org-config configs/org/mycompany.yaml \
+                 ~/updates.xlsx
+
+# Custom key column (default is 'Key')
+jiramator update --org-config configs/org/mycompany.yaml \
+                 --key-column "Issue Key" \
+                 ~/updates.xlsx
+
+# XLSX with explicit worksheet selection
+jiramator update --org-config configs/org/mycompany.yaml \
+                 --sheet-name Sheet2 \
+                 --dry-run \
+                 ~/updates.xlsx
+```
+
+Important:
+- The spreadsheet **must** have a key column (default: `Key`) containing Jira issue keys (e.g. `CA-4646`).
+- All other columns are resolved to Jira fields via the same org config alias/metadata lookup used by `import`.
+- Blank and whitespace-only cells mean **no change** — they are omitted from the payload and will **not** clear the existing Jira field value.
+- Duplicate issue keys in the spreadsheet are rejected before any update; one row must correspond to exactly one issue.
+- Rows where all non-key columns are blank are silently skipped as no-ops.
+- `--team-config` is **not** required; `update` only needs the org config for field aliases and Jira credentials.
+
+### Update behavior and safety model
+
+1. Load org config
+2. Read spreadsheet rows from CSV or XLSX
+3. Check for duplicate Jira keys — fail fast if any are found
+4. In dry-run mode, fetch Jira field metadata, build payloads, and print a preview
+5. In live mode, build payloads and update issues one by one via `PUT /rest/api/3/issue/{key}`
+6. Continue after per-row API failures; report updated/skipped/failed rows at the end
+7. Write a JSON run report to `.jiramator/runs/<UTC>-<spreadsheet>.json` (override with `--report`)
+
+The update command does not apply `bulk_create.defaults` from the org config, because those defaults often contain create-only fields (e.g. `issuetype: Risk`) that Jira rejects on update.
+
 ### Current scope vs future work
 
 Shipped today:
 - `plan`
 - `import`
+- `update`
 
 Still future work:
 - YAML-based ad-hoc bulk creation CLI
