@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import os
 import re
+import typing
 from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field, HttpUrl, ValidationError, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, ValidationError, field_validator, model_validator
 
 from jiramator.error_format import ConfigValidationError, did_you_mean, format_loc
 from jiramator.yaml_loader import LINE_KEY, resolve_line, safe_load_with_lines, strip_line_markers
@@ -38,6 +39,8 @@ _EPIC_REF_RE = re.compile(r"^\$epic:(\w+)$")
 class SprintConfig(BaseModel):
     """Sprint cadence for a PI."""
 
+    model_config = ConfigDict(extra="forbid")
+
     count: int = Field(gt=0, description="Total number of sprints in a PI")
     standard_length_weeks: int = Field(gt=0, description="Length of standard sprints in weeks")
     long_length_weeks: int = Field(gt=0, description="Length of long (extended) sprints in weeks")
@@ -63,6 +66,8 @@ class SprintConfig(BaseModel):
 class BulkCreateConfig(BaseModel):
     """Shared config for ad-hoc bulk issue creation inputs and coercion."""
 
+    model_config = ConfigDict(extra="forbid")
+
     field_aliases: dict[str, str] = Field(
         default_factory=dict,
         description="Maps source-facing field names/headers to logical field names",
@@ -87,6 +92,8 @@ class BulkCreateConfig(BaseModel):
 
 class OrgConfig(BaseModel):
     """Organization-level configuration — Jira instance, custom fields, sprint structure."""
+
+    model_config = ConfigDict(extra="forbid")
 
     jira_url: HttpUrl = Field(description="Base URL of the Jira instance")
     jira_email_env: str = Field(
@@ -161,11 +168,64 @@ class OrgConfig(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+def _unwrap_to_basemodel(annotation: Any) -> type[BaseModel] | None:
+    """Extract a nested Pydantic model class from a field annotation.
+
+    Handles plain model types, ``Optional``/``X | None`` unions, and
+    ``list[X]`` / ``dict[str, X]`` wrappers — the only shapes used in this
+    module's config models.
+    """
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return annotation
+
+    origin = typing.get_origin(annotation)
+    args = typing.get_args(annotation)
+    if origin in (list, set, tuple) and args:
+        return _unwrap_to_basemodel(args[0])
+    if origin is dict and len(args) == 2:
+        return _unwrap_to_basemodel(args[1])
+    if origin is not None and args:
+        # Union / Optional — check each non-None member.
+        for arg in args:
+            if arg is type(None):
+                continue
+            found = _unwrap_to_basemodel(arg)
+            if found is not None:
+                return found
+    return None
+
+
+def _model_at_path(
+    root_model: type[BaseModel], loc: tuple[int | str, ...]
+) -> type[BaseModel] | None:
+    """Walk a Pydantic error ``loc`` path to find the model class at that
+    location, so an ``extra_forbidden`` error can suggest a close match
+    among *that* model's actual field names.
+
+    Returns ``None`` if the path can't be resolved (e.g. it descends into a
+    plain ``dict[str, Any]`` such as a ticket template's ``fields:`` block,
+    where arbitrary keys are expected and no suggestion is meaningful).
+    """
+    current = root_model
+    for seg in loc:
+        if isinstance(seg, int):
+            continue  # list index — item type is unchanged
+        field_info = current.model_fields.get(seg)
+        if field_info is None:
+            return None
+        nested = _unwrap_to_basemodel(field_info.annotation)
+        if nested is None:
+            return None
+        current = nested
+    return current
+
+
 def _wrap_validation_error(
     exc: ValidationError,
     *,
     file: Path,
     tagged_raw: object,
+    root_model: type[BaseModel] | None = None,
     known_template_vars: frozenset[str] = KNOWN_TEMPLATE_VARS,
 ) -> ConfigValidationError:
     """Convert the first error in a Pydantic ``ValidationError`` to a
@@ -191,6 +251,17 @@ def _wrap_validation_error(
                 suggestion = did_you_mean(offenders[0], sorted(known_template_vars))
         except (IndexError, ValueError):
             suggestion = None
+    elif first["type"] == "extra_forbidden" and root_model is not None and loc:
+        # An unrecognized key was found — e.g. a typo like `custom_fiedls`.
+        # Resolve the enclosing model to suggest a close match among its
+        # actual field names, mirroring the template-var suggestion above.
+        offender = loc[-1]
+        if isinstance(offender, str):
+            parent_model = _model_at_path(root_model, loc[:-1])
+            if parent_model is not None:
+                suggestion = did_you_mean(
+                    offender, sorted(parent_model.model_fields.keys())
+                )
 
     return ConfigValidationError(
         file=file,
@@ -279,7 +350,9 @@ def load_org_config(path: str | Path) -> tuple[OrgConfig, object]:
     try:
         return OrgConfig(**clean), tagged
     except ValidationError as exc:
-        raise _wrap_validation_error(exc, file=path, tagged_raw=tagged) from exc
+        raise _wrap_validation_error(
+            exc, file=path, tagged_raw=tagged, root_model=OrgConfig
+        ) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -333,6 +406,8 @@ def _collect_template_vars_in_fields(fields: dict[str, Any], context: str) -> No
 class EpicTemplate(BaseModel):
     """Template for a recurring epic created each PI."""
 
+    model_config = ConfigDict(extra="forbid")
+
     key: str = Field(description="Internal reference key (e.g. 'bau', 'misc')")
     summary: str = Field(description="Epic summary template (supports {variables})")
     fields: dict[str, Any] = Field(
@@ -355,6 +430,8 @@ class EpicTemplate(BaseModel):
 
 class TicketTemplate(BaseModel):
     """Template for a recurring ticket generated per release or per sprint."""
+
+    model_config = ConfigDict(extra="forbid")
 
     summary: str = Field(description="Ticket summary template (supports {variables})")
     fields: dict[str, Any] = Field(
@@ -409,6 +486,8 @@ class TeamDefaults(BaseModel):
     (e.g. ``summary_prefix``) without restructuring.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     fields: dict[str, Any] = Field(
         default_factory=dict,
         description=(
@@ -421,6 +500,8 @@ class TeamDefaults(BaseModel):
 
 class TeamConfig(BaseModel):
     """Team-level configuration — project key, epics, ticket templates."""
+
+    model_config = ConfigDict(extra="forbid")
 
     project_key: str = Field(description="Jira project key (e.g. 'CA')")
     team_name: str = Field(description="Human-readable team name (e.g. 'Calcs')")
@@ -571,4 +652,6 @@ def load_team_config(path: str | Path) -> tuple[TeamConfig, object]:
     try:
         return TeamConfig(**clean), tagged
     except ValidationError as exc:
-        raise _wrap_validation_error(exc, file=path, tagged_raw=tagged) from exc
+        raise _wrap_validation_error(
+            exc, file=path, tagged_raw=tagged, root_model=TeamConfig
+        ) from exc
