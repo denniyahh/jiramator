@@ -348,6 +348,8 @@ def plan(
         )
     except ConfigDriftError as exc:
         _fail(str(exc))
+    except ConfigValidationError as exc:
+        _fail(str(exc))
 
 
 @cli.command(name="import")

@@ -126,6 +126,40 @@ def test_is_exception_subclass_and_frozen(tmp_path):
         err.line = 99  # type: ignore[misc]
 
 
+def test_propagates_through_click_command_without_crashing(tmp_path):
+    """Regression: frozen dataclass exceptions used to crash when propagating
+    out of a Click command callback.
+
+    Click wraps every command invocation in ``augment_usage_errors``, a
+    ``@contextlib.contextmanager``-based context manager. When an exception
+    escapes the ``with`` block, ``contextlib``'s generator machinery
+    explicitly reassigns ``exc.__traceback__`` while normalizing the
+    traceback across the ``yield`` boundary. A plain ``frozen=True``
+    dataclass rejects *all* attribute assignment — including dunder
+    attributes like ``__traceback__`` — so this used to raise
+    ``dataclasses.FrozenInstanceError`` instead of letting the intended
+    ``ConfigValidationError`` propagate to the caller.
+    """
+    import click
+
+    target = tmp_path / "x.yaml"
+    target.write_text("x")
+
+    @click.command()
+    def _cmd() -> None:
+        raise ConfigValidationError(
+            file=target, line=1, field_path="<root>", reason="bad",
+        )
+
+    with pytest.raises(ConfigValidationError):
+        _cmd.main(args=[], standalone_mode=False)
+
+    # Declared fields must still be genuinely immutable after the fix.
+    err = ConfigValidationError(file=target, line=1, field_path="<root>", reason="bad")
+    with pytest.raises(Exception):
+        err.reason = "mutated"  # type: ignore[misc]
+
+
 # ---------------------------------------------------------------------------
 # format_loc
 # ---------------------------------------------------------------------------
