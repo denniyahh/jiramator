@@ -307,6 +307,8 @@ def merge_configs(
             from rich.console import Console as _Console
             console = _Console(stderr=True)
         for w in warnings:
-            console.print(str(w), highlight=False, markup=False)
+            # soft_wrap keeps file paths / field-paths on one line instead of
+            # letting Rich hard-wrap a long path mid-token at the console width.
+            console.print(str(w), highlight=False, markup=False, soft_wrap=True)
 
     return team_model
