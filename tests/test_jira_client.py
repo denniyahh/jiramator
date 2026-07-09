@@ -277,7 +277,7 @@ class TestFindIssueKeysBySummaries:
                 {"key": "CA-101", "fields": {"summary": "Risk B"}},
             ]
         }
-        client._session.get = MagicMock(
+        client._session.post = MagicMock(
             return_value=_mock_response(200, search_response)
         )
 
@@ -289,7 +289,7 @@ class TestFindIssueKeysBySummaries:
         assert client.find_issue_keys_by_summaries("CA", []) == {}
 
     def test_error_raises(self, client: JiraClient) -> None:
-        client._session.get = MagicMock(
+        client._session.post = MagicMock(
             return_value=_mock_response(500, {"errorMessages": ["boom"]})
         )
         with pytest.raises(JiraApiError, match="searching for existing issues"):
