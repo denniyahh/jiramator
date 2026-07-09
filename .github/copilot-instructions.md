@@ -66,7 +66,7 @@ Test classes are named `Test<ComponentName>`, test functions follow `test_<behav
 - **Mock Rich prompts** with `@patch("jiramator.planner.Confirm.ask")` etc.
 - **Mock env vars** with pytest `monkeypatch.setenv` / `monkeypatch.delenv`.
 - **Do not mock** Pydantic validation, config YAML loading, or ticket builder logic — test those with real inputs.
-- Integration tests in `test_integration.py` use the shipped `configs/org.example/example.yaml` and `configs/teams/calcs.yaml` via `scope="module"` fixtures. Exact ticket counts (2 epics, 18 per-release, 7 per-sprint = 27 total) are asserted.
+- Integration tests in `test_integration.py` use the shipped `configs/org.example/example.yaml` and `configs/teams/calcs.yaml` via `scope="module"` fixtures. Exact ticket counts (0 epics — `bau`/`misc` are reused via `existing_epics` — 18 per-release, 7 per-sprint = 25 total) are asserted.
 
 Per-file fixtures are defined at the top of each test file. Shared path fixtures live in `tests/conftest.py`.
 

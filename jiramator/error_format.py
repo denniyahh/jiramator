@@ -51,9 +51,14 @@ class ConfigValidationError(Exception):
         return f"{rel}{line_part}: {self.field_path} — {self.reason}{suffix}"
 
     def _relative_to_cwd(self) -> str:
-        """Render ``file`` relative to CWD if possible, else absolute."""
+        """Render ``file`` relative to CWD if possible, else absolute.
+
+        Relative paths use forward slashes (``as_posix``) so error output is
+        identical on Windows, macOS, and Linux. Absolute fallbacks keep the
+        OS-native separator.
+        """
         try:
-            return str(self.file.resolve().relative_to(Path.cwd()))
+            return self.file.resolve().relative_to(Path.cwd()).as_posix()
         except ValueError:
             return str(self.file)
 
@@ -164,9 +169,10 @@ class ConfigConflictWarning:
         """Render ``p`` relative to CWD if possible, else absolute.
 
         Mirrors ``ConfigValidationError._relative_to_cwd`` so both
-        formatters render paths identically.
+        formatters render paths identically — relative paths use forward
+        slashes for cross-platform-consistent output.
         """
         try:
-            return str(p.resolve().relative_to(Path.cwd()))
+            return p.resolve().relative_to(Path.cwd()).as_posix()
         except ValueError:
             return str(p)

@@ -7,10 +7,10 @@ belongs to the planner, not tested here) is absent.
 
 Test scenario: PI28, versions [26.1.1, 26.1.2, 26.2.0].
 Expected output:
-    2 epics  (bau, misc)
+    0 epics  (bau + misc are reused via existing_epics, not created)
     6 per-release templates × 3 versions = 18 per-release tickets
     1 per-sprint template × (5 standard + 2 long-sprint) = 7 per-sprint tickets
-    Total: 27 payloads
+    Total: 25 payloads
 """
 
 from __future__ import annotations

@@ -1,16 +1,46 @@
 # Jiramator
 
-Generic, config-driven Jira ticket automation for PI planning.
+**Create all your recurring Jira tickets for a Program Increment in one command,
+instead of typing them in by hand.**
 
-Jiramator reads a pair of YAML config files — one for your organization, one for
-your team — and generates the full set of recurring Jira tickets you need at the
-start of every Program Increment: epics, per-release tickets, and per-sprint
-tickets.  Zero team-specific logic is hardcoded; everything is declarative
-config.
+Every PI, teams hand-create dozens of near-identical Jira tickets: regression
+tests per release, prod-support tickets per sprint, the same epics every time.
+Jiramator does that for you. You describe the tickets **once** in a config file,
+and Jiramator stamps out the full set — correctly linked to epics, fix versions,
+and sprints — after showing you a preview first.
+
+```mermaid
+flowchart LR
+    A[Org config<br/>Jira URL + field IDs] --> C{{jiramator}}
+    B[Team config<br/>your ticket templates] --> C
+    C -->|preview, then confirm| D[(Jira)]
+    D --> E[Epics + per-release<br/>+ per-sprint tickets]
+```
+
+**Who it's for:** product owners, scrum masters, and tech leads who run PI
+planning. You do not need to be a programmer, but the first-time setup does
+involve editing a config file and creating a Jira API token — see
+[Quick Start](#quick-start). If that feels daunting, ask a developer on your team
+to help with the one-time setup; after that, running it each PI is a single
+command.
+
+**Three things it can do:**
+
+| Command | What it does |
+|---|---|
+| `plan` | Generate a whole PI's worth of epics + per-release + per-sprint tickets from templates |
+| `import` | Create Jira issues in bulk from a CSV/Excel spreadsheet (e.g. risk intake) |
+| `update` | Bulk-edit fields on existing Jira issues from a CSV/Excel spreadsheet |
+
+Everything runs **preview-first**: `--dry-run` shows exactly what would happen and
+touches nothing in Jira until you confirm.
 
 ## Quick Start
 
 ### 1. Install
+
+**Prerequisites:** Python 3.11 or newer ([python.org/downloads](https://www.python.org/downloads/)).
+Check with `python --version`.
 
 ```bash
 # Clone the repo
@@ -20,16 +50,32 @@ git clone <repo-url> && cd jiramator
 pip install -e ".[dev]"
 ```
 
+This adds a `jiramator` command to your shell.
+
 ### 2. Set credentials
 
 Jiramator reads Jira credentials from environment variables (never from config
-files).  The default variable names are `JIRA_EMAIL` and `JIRA_TOKEN` — these
-can be overridden per-org in the org config.
+files, so your token is never committed to git). The default variable names are
+`JIRA_EMAIL` and `JIRA_TOKEN` — these can be overridden per-org in the org config.
+
+Create a Jira API token at
+**[id.atlassian.com/manage-profile/security/api-tokens](https://id.atlassian.com/manage-profile/security/api-tokens)**
+("Create API token"), then set the two variables:
 
 ```bash
+# macOS / Linux
 export JIRA_EMAIL="you@company.com"
 export JIRA_TOKEN="your-jira-api-token"
 ```
+
+```powershell
+# Windows PowerShell (current session only)
+$env:JIRA_EMAIL = "you@company.com"
+$env:JIRA_TOKEN = "your-jira-api-token"
+```
+
+Credentials are only needed for **live** runs. `--dry-run` never reads them, so
+you can preview a plan before you ever create a token.
 
 ### 3. Create config files
 
@@ -58,12 +104,20 @@ jiramator plan --org-config configs/org/mycompany.yaml \
 
 The `plan` command walks you through an interactive flow:
 
-1. Prompts for the PI number (e.g. `28`)
-2. Prompts for release versions (e.g. `26.1.1, 26.1.2, 26.2.0`)
-3. Builds the full ticket set and shows a preview with counts
-4. Checks for missing fix versions in Jira and offers to create them
-5. Asks for confirmation before creating anything
-6. Creates epics first, then bulk-creates remaining tickets
+1. Prompts for the PI number — accepts `28`, `PI28`, or `pi28` (all become `PI28`)
+2. Asks **how many** fix versions this PI has, then prompts for each version
+   string one at a time (e.g. `26.1.1`, then `26.1.2`, then `26.2.0`)
+3. If the team config has a `board_id`, resolves whether the PI's sprints already
+   exist in Jira (from `--sprints-exist/--no-sprints-exist`, the `sprints_exist:`
+   config field, or an interactive prompt)
+4. Builds the full ticket set and shows a preview table with counts
+5. On `--dry-run`, stops here — nothing is created
+6. Checks for missing fix versions in Jira and offers to create them
+7. Warns that re-running creates duplicates, then asks for confirmation
+8. Creates epics first, then bulk-creates the remaining tickets (assigning
+   sprints if they were resolved in step 3)
+9. Writes a run report to `.jiramator/runs/` (see
+   [Run reports & resuming](#run-reports--resuming-a-failed-run))
 
 ## Commands
 
@@ -82,6 +136,18 @@ jiramator plan --org-config configs/org/mycompany.yaml \
                --team-config configs/teams/myteam.yaml \
                --dry-run
 ```
+
+**Options:**
+
+| Flag | Description |
+|---|---|
+| `-o, --org-config PATH` | Org config file, or a directory containing exactly one (default: `./configs/org/`) |
+| `-t, --team-config PATH` | Team config YAML file (**required**) |
+| `-n, --dry-run` | Preview the ticket set and exit without creating anything |
+| `--sprints-exist / --no-sprints-exist` | Whether this PI's sprints already exist in Jira. Overrides the `sprints_exist:` config field. `--no-sprints-exist` skips the Jira board lookup entirely |
+| `--report PATH` | Where to write the run report (default: `.jiramator/runs/<UTC>-<team>.json`) |
+| `--resume [PATH]` | Resume a previous failed/partial run. Bare `--resume` auto-finds the latest for this team; `--resume <path>` targets a specific report |
+| `--force` | With `--resume`, skip the config-drift safety check (use only if you understand the duplicate-creation risk) |
 
 ### `import`
 
@@ -120,6 +186,21 @@ Important:
 - The shipped `configs/teams/calcs.yaml` example happens to target `CA`, but that is configuration, not product logic.
 - `spreadsheet_path` is a required positional argument. There is no `--file` flag in the current implementation.
 - `--sheet-name` applies only to `.xlsx` imports.
+
+**Options:**
+
+| Flag | Description |
+|---|---|
+| `-o, --org-config PATH` | Org config file or directory (default: `./configs/org/`) |
+| `-t, --team-config PATH` | Team config YAML file (**required** — supplies `project_key`) |
+| `-n, --dry-run` | Preview payloads and exit without creating issues |
+| `--sheet-name NAME` | Worksheet name for `.xlsx` inputs (defaults to the first sheet) |
+| `--max-rows N` | Read at most `N` spreadsheet rows (handy during bring-up) |
+| `--preview-rows N` | How many prepared rows to show in the preview (default: 5) |
+| `--encoding NAME` | Force a CSV encoding instead of auto-detecting (e.g. `utf-8`, `utf-8-sig`, `cp1252`, `utf-16-le`) |
+| `--report PATH` | Where to write the run report (default: `.jiramator/runs/<UTC>-<team>.json`) |
+| `--resume [PATH]` | Resume a previous import (bare = auto-find latest; or pass a report path) |
+| `--force` | With `--resume`, skip the config-drift check |
 
 ### Import behavior and safety model
 
@@ -241,15 +322,51 @@ Important:
 
 The update command does not apply `bulk_create.defaults` from the org config, because those defaults often contain create-only fields (e.g. `issuetype: Risk`) that Jira rejects on update.
 
+### Run reports & resuming a failed run
+
+Every **live** run of `plan`, `import`, and `update` writes a JSON run report to
+`.jiramator/runs/<UTC>-<name>.json` (override the location with `--report`). The
+report records exactly which issues were created, skipped, or failed — a durable
+audit trail, written incrementally so it survives a crash or Ctrl-C.
+
+If a run fails partway through (a network blip, one bad row, an auth expiry),
+`plan` and `import` let you pick up where you left off:
+
+```bash
+# Auto-find and resume the most recent failed/partial run for this team config
+jiramator plan -t configs/teams/myteam.yaml --resume
+
+# Or resume a specific report
+jiramator import -t configs/teams/myteam.yaml --resume .jiramator/runs/2026-...json ~/Jira.xlsx
+```
+
+Issues already created in the prior run are **skipped**, so resuming never
+double-creates them.
+
+**Drift protection:** resume first compares a hash of the resolved config and
+inputs against the prior run. If they differ — because you edited templates,
+changed the versions, or renamed an epic ref — resume refuses and asks you to
+either start fresh or pass `--force`. This prevents silently creating duplicates
+when the meaning of a template has changed. Use `--force` only when you're sure
+the change is safe.
+
+> `update` writes a run report as well, but does not currently support
+> `--resume`; re-run it against the same spreadsheet (blank cells are no-ops, so
+> re-running is safe for rows that already succeeded).
+
 ### Current scope vs future work
 
 Shipped today:
-- `plan`
-- `import`
-- `update`
+- `plan`, `import`, and `update` commands
+- Run reports + `--resume` with config-drift protection (`plan`, `import`)
+- Template inheritance (org `default_fields` → team `defaults` → template `fields`)
+- Sprint assignment for `plan` (via `board_id` + `sprint_name_template`)
+- Pre-existing epic reuse (`existing_epics`) and release→sprint mapping
+- CSV encoding auto-detection with `--encoding` override
 
 Still future work:
 - YAML-based ad-hoc bulk creation CLI
+- An interactive `setup` wizard for first-time config generation
 - broader README examples and operational playbooks
 
 Planning/spec artifacts now live under `.planning/specs/`.
@@ -273,16 +390,21 @@ Jiramator uses a two-tier configuration model:
 | `jira_url` | string | **yes** | Base URL of your Jira instance |
 | `jira_email_env` | string | no | Env var name for email (default: `JIRA_EMAIL`) |
 | `jira_token_env` | string | no | Env var name for API token (default: `JIRA_TOKEN`) |
-| `custom_fields` | map | **yes** | Mapping of logical names → Jira custom field IDs |
+| `custom_fields` | map | no | Mapping of logical names → Jira custom field IDs (needed if your templates reference logical names or use sprint assignment) |
+| `default_fields` | map | no | Fields **locked** onto every issue created by `plan` under any team in this org. Same-name keys in team `defaults` or template `fields` are warned and dropped at load time. Not applied by `import`. |
 | `bulk_create.field_aliases` | map | no | Spreadsheet/import header aliases → logical or Jira field names |
 | `bulk_create.field_types` | map | no | Coercion rules for logical or Jira field names |
-| `bulk_create.defaults` | map | no | Default field values applied during bulk-create/import workflows |
+| `bulk_create.defaults` | map | no | Default field values gap-filled during `import` (only when the field isn't already set) |
 | `bulk_create.auto_lookup_unknown_fields` | bool | no | Whether import may use Jira field metadata to resolve unknown headers |
 | `bulk_create.multi_value_delimiter` | string | no | Delimiter for parsing multi-value spreadsheet cells |
 | `sprints.count` | int | **yes** | Number of sprints per PI |
 | `sprints.standard_length_weeks` | int | **yes** | Length of standard sprints in weeks |
 | `sprints.long_length_weeks` | int | **yes** | Length of extended sprints in weeks |
 | `sprints.long_sprints` | list[int] | no | Which sprint numbers are long (1-indexed) |
+
+> **Sprint field:** the Jira custom field used to assign a sprint defaults to
+> `customfield_10021`. If your instance differs, add `sprint_field:
+> customfield_XXXXX` under `custom_fields`.
 
 **Example** (`configs/org.example/example.yaml`):
 
@@ -329,9 +451,16 @@ sprints:
 | `team_name` | string | **yes** | Team display name, available as `{team_name}` |
 | `board_id` | int/null | no | Jira board ID for sprint assignment (null to skip) |
 | `sprint_name_template` | string/null | no | Pattern to match sprints (e.g. `"CA Sprint {pi_num}.{sprint_num}"`) |
-| `recurring_epics` | list | no | Epics created at the start of each PI |
+| `sprints_exist` | bool/null | no | Whether this PI's sprints already exist in Jira. `null` = ask interactively (or error on non-TTY); `true` = resolve sprints; `false` = skip the board lookup. Overridden by `--sprints-exist/--no-sprints-exist`. |
+| `defaults.fields` | map | no | Team-wide fields merged into **every** template (epics + tickets) in this config. Locked — same-name keys in a template's `fields` are warned and dropped. |
+| `existing_epics` | map | no | Reuse epics that already exist instead of creating them: `ref_key → Jira key` (e.g. `{bau: CA-1234}`). Referenced the same way as `recurring_epics` via `$epic:<ref_key>`. |
+| `release_sprint_map` | map | no | Assign per-release tickets to sprints: `version → {sprint_group: sprint_number}` (used with a template's `sprint_group`). |
+| `recurring_epics` | list | no | Epics created fresh at the start of each PI |
 | `per_release_tickets` | list | no | Tickets generated once per release version |
 | `per_sprint_tickets` | list | no | Tickets generated once per sprint |
+
+A given epic `ref_key` may appear in **either** `recurring_epics` or
+`existing_epics`, never both.
 
 #### Epic Template
 
@@ -352,11 +481,15 @@ The `key` is used in ticket templates to link tickets to this epic via
 work the same way as ticket `fields`: standard Jira fields are wrapped as
 needed, and `customfield_*` values are passed through as raw JSON.
 
+> To **reuse** epics that already exist in Jira rather than creating new ones,
+> use [`existing_epics`](#reusing-existing-epics) instead of `recurring_epics`.
+
 #### Ticket Template
 
 ```yaml
 per_release_tickets:
   - summary: "Testing - {version} Pre-regression test"
+    sprint_group: "pre"                # optional: see "Assigning ... to sprints"
     fields:
       issuetype: Task
       priority: Medium
@@ -385,6 +518,66 @@ per_sprint_tickets:
 For a 6-sprint PI where sprint 6 is long, this produces:
 - Sprints 1–5: one ticket each (`Sprint 1`, `Sprint 2`, ... `Sprint 5`)
 - Sprint 6: two tickets (`Sprint 6a`, `Sprint 6b`)
+
+#### Reusing existing epics
+
+Many teams keep the *same* epics across PIs (or create them by hand). Instead of
+listing them under `recurring_epics` (which creates new ones), map each ref key
+to the real Jira issue key under `existing_epics`:
+
+```yaml
+existing_epics:
+  bau:  CA-4829
+  misc: CA-4830
+
+recurring_epics: []   # nothing to create — reuse the keys above
+```
+
+`$epic:bau` / `$epic:misc` in ticket templates resolve to those keys exactly as
+if they had been created this run. A ref key may live in `recurring_epics` **or**
+`existing_epics`, but not both.
+
+#### Team defaults (shared fields)
+
+If every ticket in a team config needs the same field (say a fixed API-impact
+value), declare it once under `defaults.fields` instead of repeating it in every
+template:
+
+```yaml
+defaults:
+  fields:
+    customfield_10273: [{value: "No"}]   # applied to every epic + ticket
+
+per_release_tickets:
+  - summary: "Testing - {version} Pre-regression test"
+    fields:
+      issuetype: Task                     # customfield_10273 is inherited
+```
+
+Team defaults are **locked**: if a template also sets the same field, Jiramator
+prints a warning and keeps the default. (Org-level `default_fields` lock across
+*all* teams in the same way, and win over team defaults.)
+
+#### Assigning per-release tickets to sprints
+
+Per-release tickets don't have a natural sprint number. To place them, tag a
+template with a `sprint_group` and map each version's groups to sprint numbers in
+`release_sprint_map`:
+
+```yaml
+release_sprint_map:
+  "26.2.1": { pre: 2, post: 3 }
+  "26.2.2": { pre: 4, post: 5 }
+
+per_release_tickets:
+  - summary: "Testing - {version} Pre-regression test"
+    sprint_group: "pre"     # 26.2.1 → sprint 2, 26.2.2 → sprint 4, ...
+    fields: { issuetype: Task, fixVersions: ["{version}"] }
+```
+
+Sprint assignment only happens on live runs when `board_id` and
+`sprint_name_template` are set and the sprints already exist (see the
+[`plan` flow](#quick-start)).
 
 ## Template Variable Reference
 
@@ -462,13 +655,23 @@ python -m pytest -v
 Run the full suite after changing config, import, coercion, or Jira client behavior.
 The exact test count will change over time; rely on pytest output rather than this README for a hard number.
 
+Continuous integration runs the same suite on every push and pull request across
+Linux, macOS, and Windows (Python 3.11–3.13) via
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+
 ## Future Enhancements
 
 - **`setup` subcommand** — Interactive wizard to generate org and team config
-  files step by step.
-- **Duplicate detection** — Query Jira for existing tickets matching summary +
-  PI label before creating, skip duplicates automatically.
-- **`--yes` flag** — Skip all confirmation prompts for CI/scripted usage.
+  files step by step (a big win for non-technical first-time setup).
+- **Field-discovery helper** — A command to list/search your Jira instance's
+  custom field IDs so you don't have to hand-map them from the REST API.
+- **MCP server** — Drive `plan`/`import`/`update` from an AI assistant
+  (Copilot, Claude) in natural language, removing the CLI/YAML barrier. See the
+  design proposal in [`docs/mcp-server-proposal.md`](docs/mcp-server-proposal.md).
+- **Duplicate detection for `plan`** — Query Jira for existing tickets matching
+  summary + PI label before creating, and skip them automatically. (`import`
+  already skips exact-summary duplicates; `plan` does not.)
+- **`--yes` flag** — Skip confirmation prompts for scripted/CI usage.
 - **Sub-task support** — Allow `type: Sub-task` with a `parent` field linking to
   a parent issue (not just epic linking).
 
