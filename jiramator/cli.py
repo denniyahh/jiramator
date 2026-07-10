@@ -25,7 +25,7 @@ from jiramator.importer import (
     run_import,
 )
 from jiramator.jira_client import JiraApiError, JiraClient
-from jiramator.planner import run_plan
+from jiramator.planner import PlanInputs, make_plan_inputs, run_plan
 from jiramator.run_report import (
     ConfigDriftError,
     IssueResult,
@@ -281,6 +281,31 @@ def cli() -> None:
     ),
 )
 @click.option(
+    "--pi-number",
+    "pi_number",
+    default=None,
+    type=click.STRING,
+    help="PI number (e.g. 29). Provide with --versions to run non-interactively. "
+    "If omitted, you are prompted.",
+)
+@click.option(
+    "--versions",
+    "versions_csv",
+    default=None,
+    type=click.STRING,
+    help="Comma-separated fix versions (e.g. 26.2.1,26.2.2). Provide with "
+    "--pi-number to run non-interactively. If omitted, you are prompted.",
+)
+@click.option(
+    "--yes",
+    "-y",
+    "assume_yes",
+    is_flag=True,
+    default=False,
+    help="Skip confirmation prompts (fix-version creation and final create). "
+    "For non-interactive/automated runs. Use with care — this writes to Jira.",
+)
+@click.option(
     "--resume",
     "resume_arg",
     is_flag=False,
@@ -304,10 +329,18 @@ def plan(
     dry_run: bool,
     report_path: Path | None,
     sprints_exist_override: bool | None,
+    pi_number: str | None,
+    versions_csv: str | None,
+    assume_yes: bool,
     resume_arg: str | None,
     force: bool,
 ) -> None:
-    """Interactive PI planning — generate tickets for a new PI."""
+    """PI planning — generate tickets for a new PI.
+
+    Runs interactively by default. Provide --pi-number and --versions (and
+    --yes for writes) to run fully non-interactively, e.g. from CI or an
+    MCP front-end.
+    """
     # -- Load configs -------------------------------------------------------
     try:
         resolved_org_path = _resolve_org_config_path(org_config_path)
@@ -349,6 +382,16 @@ def plan(
     if report_path is None:
         report_path = default_report_path(team_config_path)
 
+    # -- Build non-interactive inputs if provided --------------------------
+    plan_inputs: PlanInputs | None = None
+    if pi_number is not None or versions_csv is not None:
+        if pi_number is None or versions_csv is None:
+            _fail("--pi-number and --versions must be provided together.")
+        try:
+            plan_inputs = make_plan_inputs(pi_number, versions_csv.split(","))
+        except ValueError as exc:
+            _fail(str(exc))
+
     # -- Hand off to planner -----------------------------------------------
     try:
         run_plan(
@@ -363,6 +406,8 @@ def plan(
             team_config_path=team_config_path,
             command=list(sys.argv),
             sprints_exist_override=sprints_exist_override,
+            inputs=plan_inputs,
+            assume_yes=assume_yes,
         )
     except ConfigDriftError as exc:
         _fail(str(exc))

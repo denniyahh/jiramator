@@ -18,6 +18,7 @@ point) so that ``--dry-run`` can skip credential resolution entirely.
 from __future__ import annotations
 
 import sys
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -40,6 +41,78 @@ from jiramator.ticket_builder import _strip_template_key, build_all
 
 # Default sprint field ID in Jira (overridable via org_config.custom_fields["sprint_field"])
 _DEFAULT_SPRINT_FIELD = "customfield_10021"
+
+
+# ---------------------------------------------------------------------------
+# Plan inputs (non-interactive)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class PlanInputs:
+    """Validated inputs for a plan run, decoupled from how they were collected.
+
+    The CLI populates this from Rich prompts (interactive) or from
+    ``--pi-number``/``--versions`` flags; the MCP / CI front-ends populate it
+    straight from structured arguments. Either way ``run_plan`` receives the
+    same object, so no interactive I/O leaks into the orchestration core.
+
+    Attributes:
+        pi_num: Bare PI number, e.g. ``"29"`` (no ``PI`` prefix).
+        pi_label: Display label, e.g. ``"PI29"``.
+        versions: Ordered, non-empty fix version strings.
+    """
+
+    pi_num: str
+    pi_label: str
+    versions: list[str]
+
+
+def normalize_pi_number(raw: str) -> tuple[str, str]:
+    """Normalize a raw PI number into ``(pi_num, pi_label)``.
+
+    Accepts ``"PI28"``, ``"pi28"``, or ``"28"`` and returns
+    ``("28", "PI28")``.
+
+    Raises:
+        ValueError: If the value is empty after stripping the prefix.
+    """
+    raw = raw.strip()
+    if not raw:
+        raise ValueError("PI number cannot be empty.")
+    pi_num = raw.upper().removeprefix("PI")
+    if not pi_num:
+        raise ValueError("PI number cannot be empty.")
+    return pi_num, f"PI{pi_num}"
+
+
+def normalize_versions(versions: list[str]) -> list[str]:
+    """Strip and validate a list of fix version strings.
+
+    Raises:
+        ValueError: If any entry is blank or the resulting list is empty.
+    """
+    cleaned: list[str] = []
+    for i, v in enumerate(versions, 1):
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError(f"Fix version string {i} cannot be empty.")
+        cleaned.append(stripped)
+    if not cleaned:
+        raise ValueError("At least one fix version is required.")
+    return cleaned
+
+
+def make_plan_inputs(pi_number: str, versions: list[str]) -> PlanInputs:
+    """Build a validated ``PlanInputs`` from raw, non-interactive values.
+
+    Raises:
+        ValueError: If the PI number or any version string is invalid.
+    """
+    pi_num, pi_label = normalize_pi_number(pi_number)
+    return PlanInputs(
+        pi_num=pi_num, pi_label=pi_label, versions=normalize_versions(versions)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -95,6 +168,18 @@ def _prompt_fix_versions(console: Console) -> list[str]:
 
     console.print(f"  → versions = [cyan]{versions}[/]")
     return versions
+
+
+def _collect_plan_inputs(console: Console) -> PlanInputs:
+    """Gather plan inputs interactively via Rich prompts.
+
+    This is the only place the plan flow touches the terminal for input; the
+    result is a plain ``PlanInputs`` that ``run_plan`` consumes identically to
+    the non-interactive (flag / MCP) path.
+    """
+    pi_num, pi_label = _prompt_pi_number(console)
+    versions = _prompt_fix_versions(console)
+    return PlanInputs(pi_num=pi_num, pi_label=pi_label, versions=versions)
 
 
 def _prompt_sprints_exist(console: Console) -> bool:
@@ -158,10 +243,13 @@ def _check_and_create_fix_versions(
     project_key: str,
     needed_versions: list[str],
     console: Console,
+    *,
+    assume_yes: bool = False,
 ) -> None:
     """Check existing fix versions and create any that are missing.
 
-    Prompts the user for confirmation before creating.
+    Prompts the user for confirmation before creating, unless ``assume_yes``
+    is set (non-interactive callers).
 
     Raises:
         SystemExit: If the user declines to create missing versions.
@@ -180,7 +268,9 @@ def _check_and_create_fix_versions(
         f"\n[yellow]⚠[/] The following fix versions do not exist and will "
         f"be created: [bold]{', '.join(missing)}[/]"
     )
-    if not Confirm.ask("Create these fix versions?", default=False, console=console):
+    if not assume_yes and not Confirm.ask(
+        "Create these fix versions?", default=False, console=console
+    ):
         console.print("[red]Aborted.[/] Cannot proceed without fix versions.")
         sys.exit(1)
 
@@ -447,13 +537,16 @@ def run_plan(
     team_config_path: Path | None = None,
     command: list[str] | None = None,
     sprints_exist_override: bool | None = None,
+    inputs: PlanInputs | None = None,
+    assume_yes: bool = False,
 ) -> None:
-    """Execute the full interactive PI planning flow.
+    """Execute the full PI planning flow.
 
     This is the single entry point called by ``cli.py``.
 
     Steps:
-        1. Prompt for PI number, fix version count, version strings
+        1. Collect inputs (PI number + fix versions) — from ``inputs`` if
+           provided (non-interactive), otherwise via Rich prompts
         2. Drift check vs prior_report (if given) — fail unless force=True
         3. Initialize and persist a starter run report
         4. Build initial payloads (dry-run: epic refs unresolved)
@@ -482,15 +575,21 @@ def run_plan(
             None and accept empty strings on disk.
         command: argv-shaped list, recorded for audit. Caller must not put
             secrets on the command line.
+        inputs: Pre-collected, validated ``PlanInputs``. When provided the flow
+            runs fully non-interactively (no PI/version prompts). When ``None``
+            the inputs are gathered via Rich prompts.
+        assume_yes: When True, skip the fix-version and final creation
+            confirmation prompts (equivalent to an interactive "yes"). Enables
+            non-interactive writes from MCP / CI front-ends.
     """
     if console is None:
         console = Console(stderr=True)
 
-    # -- Step 1: Interactive prompts ----------------------------------------
-    console.print("\n[bold]── PI Planning ──[/]\n")
-
-    pi_num, pi_label = _prompt_pi_number(console)
-    versions = _prompt_fix_versions(console)
+    # -- Step 1: Collect inputs (interactive prompts or provided) -----------
+    if inputs is None:
+        console.print("\n[bold]── PI Planning ──[/]\n")
+        inputs = _collect_plan_inputs(console)
+    pi_num, pi_label, versions = inputs.pi_num, inputs.pi_label, inputs.versions
 
     # -- Step 2: Drift check ------------------------------------------------
     current_hash = compute_resolved_hash(org_config, team_config, pi_label, versions)
@@ -549,6 +648,7 @@ def run_plan(
             report=report, prior_created_keys=prior_created_keys,
             persist=_persist,
             sprints_exist_override=sprints_exist_override,
+            assume_yes=assume_yes,
         )
     except BaseException:
         # Persist whatever state we got to before the exception (covers
@@ -571,6 +671,7 @@ def _run_plan_inner(
     prior_created_keys: dict[str, str],
     persist,
     sprints_exist_override: bool | None = None,
+    assume_yes: bool = False,
 ) -> None:
     """Inner pipeline — wrapped by run_plan's try/except for persist-on-error."""
     # Sprint assignment info
@@ -622,7 +723,8 @@ def _run_plan_inner(
     needed_versions = list(dict.fromkeys(versions))  # deduplicate, preserve order
     console.print()
     _check_and_create_fix_versions(
-        client, team_config.project_key, needed_versions, console
+        client, team_config.project_key, needed_versions, console,
+        assume_yes=assume_yes,
     )
 
     # -- Step 9: Duplicate warning + confirm --------------------------------
@@ -630,7 +732,7 @@ def _run_plan_inner(
         "\n[yellow bold]⚠ This script does NOT check for duplicates.[/]\n"
         "  Running it again for the same PI will create duplicate tickets."
     )
-    if not Confirm.ask(
+    if not assume_yes and not Confirm.ask(
         f"\nCreate these {total} tickets?", default=False, console=console
     ):
         console.print("[red]Aborted.[/]")
