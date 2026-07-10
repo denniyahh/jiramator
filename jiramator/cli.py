@@ -393,7 +393,7 @@ def plan(
     "--sheet-name",
     type=str,
     default=None,
-    help="Optional worksheet name for XLSX imports.",
+    help="Optional worksheet name for XLSX files (defaults to the first sheet).",
 )
 @click.option(
     "--dry-run",
@@ -445,7 +445,8 @@ def plan(
     "force",
     is_flag=True,
     default=False,
-    help="With --resume: ignore the config-drift check.",
+    help="With --resume: ignore the resolved-config-hash drift check. "
+    "Use only if you understand the risk of duplicate creation.",
 )
 @click.argument("spreadsheet_path", type=click.Path(exists=True, path_type=Path))
 def import_command(
@@ -595,14 +596,16 @@ def import_command(
     "--sheet-name",
     type=str,
     default=None,
-    help="Optional worksheet name for XLSX inputs.",
+    help="Optional worksheet name for XLSX files (defaults to the first sheet).",
 )
 @click.option(
     "--dry-run",
     "-n",
     is_flag=True,
     default=False,
-    help="Preview update payloads and exit without modifying issues.",
+    help="Preview update payloads and exit without modifying issues. Still "
+    "requires valid Jira credentials and network access (fetches field "
+    "metadata for coercion), unlike 'plan'/'import' dry-run.",
 )
 @click.option(
     "--max-rows",
@@ -615,7 +618,7 @@ def import_command(
     type=int,
     default=5,
     show_default=True,
-    help="Number of rows to include in preview output.",
+    help="Number of prepared rows to include in preview output.",
 )
 @click.option(
     "--encoding",

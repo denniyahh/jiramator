@@ -112,8 +112,11 @@ $env:JIRA_EMAIL = "you@company.com"
 $env:JIRA_TOKEN = "your-jira-api-token"
 ```
 
-Credentials are only needed for **live** runs. `--dry-run` never reads them, so
-you can preview a plan before you ever create a token.
+Credentials aren't needed to preview: `plan --dry-run` and `import --dry-run`
+never read them, so you can try those out before you ever create a token.
+`update --dry-run` is the one exception — it still needs valid credentials
+and live Jira access, because it fetches field metadata to preview how your
+spreadsheet values will be coerced.
 
 ### 3. Configure your org and team
 
@@ -214,6 +217,10 @@ Copy it, fill in real issue keys and the fields you want to change, and run:
 jiramator update --dry-run ~/my-updates.xlsx   # preview — changes nothing
 jiramator update ~/my-updates.xlsx             # live — updates issues row by row
 ```
+
+> Unlike `plan`/`import`, `update --dry-run` still requires valid Jira
+> credentials and network access — it fetches field metadata from Jira to
+> preview coercion. It changes nothing, but it isn't credential-free.
 
 📖 **For the full flag reference and safety model** for both `import` and
 `update` — column resolution order, value coercion rules, duplicate handling,
