@@ -43,18 +43,50 @@ touches nothing in Jira until you confirm.
 
 ### 1. Install
 
-**Prerequisites:** Python 3.11 or newer ([python.org/downloads](https://www.python.org/downloads/)).
-Check with `python --version`.
+**Prerequisites:**
+- Python 3.11 or newer ([python.org/downloads](https://www.python.org/downloads/)).
+  Check with `python3 --version` (Windows: `py --version`).
+- Git ([git-scm.com/downloads](https://git-scm.com/downloads)). If you'd rather
+  not install Git, click the green **Code → Download ZIP** button on the
+  [GitHub repo page](https://github.com/dkim_mktx/jiramator) instead, then
+  extract it and open a terminal in that folder.
 
 ```bash
-# Clone the repo
-git clone https://github.com/dkim_mktx/jiramator.git && cd jiramator
+# macOS / Linux
+git clone https://github.com/dkim_mktx/jiramator.git
+cd jiramator
+
+# Create and activate a virtual environment (keeps Jiramator's dependencies
+# isolated, and avoids "externally-managed-environment" pip errors some
+# systems now enforce)
+python3 -m venv .venv
+source .venv/bin/activate
 
 # Install
 pip install -e .
+
+# Verify it worked
+jiramator --version
 ```
 
-This adds a `jiramator` command to your shell.
+```powershell
+# Windows PowerShell
+git clone https://github.com/dkim_mktx/jiramator.git
+cd jiramator
+
+py -m venv .venv
+.venv\Scripts\Activate.ps1
+
+pip install -e .
+
+jiramator --version
+```
+
+`jiramator --version` should print `jiramator, version 1.0.0` (or newer). If
+you instead see `command not found` / `'jiramator' is not recognized`, the
+virtual environment likely isn't activated — re-run the `activate` line above
+(it's shell/session-specific, so you'll need to run it again each time you
+open a new terminal).
 
 ### 2. Set credentials
 
