@@ -22,8 +22,7 @@ planning. You do not need to be a programmer, but the first-time setup does
 involve editing a config file and creating a Jira API token — see
 [Quick Start](#quick-start). If that feels daunting, ask a developer on your team
 to help with the one-time setup; after that, running it each PI is a single
-command — or skip installing entirely and run it from your browser via
-[GitHub Actions](#run-it-without-installing--github-actions).
+command.
 
 **Three things it can do:**
 
@@ -232,45 +231,11 @@ wiki pages.
 
 ## Run It Without Installing — GitHub Actions
 
-Don't want to install Python, mint a token, or touch a terminal? If a developer
-has set this repo up for you, you can run PI planning **entirely from your web
-browser** using the bundled GitHub Actions form
-([`.github/workflows/jiramator-plan.yml`](.github/workflows/jiramator-plan.yml)).
-
-> **Status:** early alternative — currently covers the `plan` command only.
-> `import`/`update` still use the CLI.
-
-**How you run it (no install):**
-
-1. Open the repo on GitHub → the **Actions** tab.
-2. In the left sidebar, click **Jiramator Plan**.
-3. Click **Run workflow** (top-right). A short form appears.
-4. Fill it in:
-   - **mode** — `preview` (safe, changes nothing) or `create` (writes to Jira).
-   - **pi_number** — e.g. `29`.
-   - **versions** — comma-separated, e.g. `26.2.1,26.2.2`.
-   - **sprints_exist** — whether the PI's sprints already exist in Jira.
-   - **team_config / org_config** — leave the defaults unless told otherwise.
-   - **confirm_create** — only for `create` mode: type `CREATE` to confirm.
-5. Click the green **Run workflow** button.
-6. When the run finishes, open it and read the **Summary** page — the ticket
-   preview (and, in create mode, the results) appear there. The run report is
-   also attached as a downloadable artifact.
-
-**Always start with `mode = preview`.** It shows exactly what would be created
-and touches nothing in Jira — the same preview-first safety as the CLI.
-
-**One-time setup (a developer does this once):**
-
-- Add the Jira credentials as **repository secrets** (Settings → Secrets and
-  variables → Actions): `JIRA_EMAIL` and `JIRA_TOKEN`. This is why *you* never
-  handle a token — it lives in the repo, not on your machine.
-- Point the form's `team_config` at a real team config. Because `configs/teams/`
-  is gitignored, the team config must be made available to the workflow (e.g.
-  committed to a private repo or fetched during the run).
-
-Preview mode works out of the box against the shipped example configs and needs
-**no secrets** — safe to try immediately.
+There is an **experimental, no-install** way to run PI planning from your web
+browser using a bundled GitHub Actions form — but it requires GitHub Actions to
+be enabled on the repo, which is often disabled by enterprise policy. See
+**[Running via GitHub Actions](https://github.com/dkim_mktx/jiramator/wiki/Running-via-GitHub-Actions)**
+on the wiki for details and setup.
 
 ## Getting Help
 
