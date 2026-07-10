@@ -87,6 +87,12 @@ cp configs/org.example/example.yaml  configs/org/mycompany.yaml
 cp configs/teams/calcs.yaml          configs/teams/myteam.yaml
 ```
 
+Two org examples ship in `configs/org.example/`: `example.yaml` is a minimal
+starting point, and `marketaxess.yaml` is a fuller, production-shaped
+reference (real custom field IDs, a populated `bulk_create` block) — use
+whichever is closer to your own setup. `configs/org/` is gitignored, so your
+real org config never leaves your machine.
+
 See [Config Reference](#config-reference) below for the full schema.
 
 ### 4. Run
@@ -442,6 +448,11 @@ sprints:
   long_length_weeks: 3
   long_sprints: [6]
 ```
+
+For a fuller, production-shaped reference — real custom field IDs and a
+populated `bulk_create` block for a risk-intake spreadsheet — see
+`configs/org.example/marketaxess.yaml`. Both examples are gitignore-free
+(shipped in the repo); only your copy under `configs/org/` is local-only.
 
 ### Team Config
 
