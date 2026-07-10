@@ -135,22 +135,28 @@ Shipped as of v1.0.0:
 - Pre-existing epic reuse (`existing_epics`) and release→sprint mapping
 - CSV encoding auto-detection with `--encoding` override
 
+Shipped since v1.0.0:
+- **`init` setup wizard** (v1.1.0) — interactive `jiramator init` that connects
+  to Jira, auto-discovers custom field IDs, validates your project, sets up
+  credentials, and writes both config files (also delivers the field-discovery
+  helper as a built-in step).
+- **Non-interactive `plan`** (v1.0.1) — `--pi-number`, `--versions`, and
+  `--yes` flags let `plan` run promptless for scripted usage.
+
 Ideas for future work, roughly in order of expected value — pick one up if
 you'd like to contribute:
 
-- **`setup` subcommand** — interactive wizard to generate org and team config
-  files step by step (a big win for non-technical first-time setup).
-- **Field-discovery helper** — a command to list/search your Jira instance's
-  custom field IDs so you don't have to hand-map them from the REST API.
-- **MCP server** — drive `plan`/`import`/`update` from an AI assistant
-  (Copilot, Claude) in natural language, removing the CLI/YAML barrier. See
-  the design proposal in [`docs/mcp-server-proposal.md`](docs/mcp-server-proposal.md).
 - **Duplicate detection for `plan`** — query Jira for existing tickets
   matching summary + PI label before creating, and skip them automatically.
   (`import` already skips exact-summary duplicates; `plan` does not.)
-- **`--yes` flag** — skip confirmation prompts for scripted/CI usage.
 - **Sub-task support** — allow `type: Sub-task` with a `parent` field linking
   to a parent issue (not just epic linking).
+- **Config diff** — compare two team configs to see what changed between PIs.
+- **MCP server** — _reviewed and declined_ as the primary accessibility path
+  (see [`docs/mcp-server-proposal.md`](docs/mcp-server-proposal.md) for the full
+  design and the review outcome). The real on-ramp barriers were addressed by
+  the setup wizard and non-interactive CLI instead. Retained here only as a
+  possible future integration, not a recommended next step.
 - Broader README examples and operational playbooks.
 
 ## Submitting changes

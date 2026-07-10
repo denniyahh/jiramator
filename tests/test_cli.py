@@ -943,3 +943,79 @@ class TestPlanSprintsExistFlag:
         assert result.exit_code == 0
         assert "--sprints-exist" not in result.output
         assert "--no-sprints-exist" not in result.output
+
+
+# ---------------------------------------------------------------------------
+# init command wiring (CN1-CN4)
+# ---------------------------------------------------------------------------
+
+
+class TestInitCommand:
+    """Verify the ``init`` command wires flags through to ``run_init``.
+
+    These exercise wiring only — ``run_init`` is stubbed at the
+    ``jiramator.cli`` import site; the wizard's own behavior is covered in
+    ``tests/test_wizard.py``.
+    """
+
+    def test_cn1_invokes_run_init_with_defaults(
+        self, runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """CN1: `init` calls run_init with the default org/team dirs and force=False."""
+        captured: dict[str, Any] = {}
+
+        def _recorder(console: Any = None, **kwargs: Any) -> None:
+            captured["kwargs"] = kwargs
+
+        monkeypatch.setattr("jiramator.cli.run_init", _recorder)
+        result = runner.invoke(cli, ["init"])
+        assert result.exit_code == 0, result.output
+        assert captured["kwargs"]["org_dir"] == Path("./configs/org/")
+        assert captured["kwargs"]["team_dir"] == Path("./configs/teams/")
+        assert captured["kwargs"]["force"] is False
+
+    def test_cn2_passes_custom_dirs_and_force(
+        self, runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """CN2: --org-config/--team-config/--force flow through to run_init."""
+        captured: dict[str, Any] = {}
+
+        def _recorder(console: Any = None, **kwargs: Any) -> None:
+            captured["kwargs"] = kwargs
+
+        monkeypatch.setattr("jiramator.cli.run_init", _recorder)
+        result = runner.invoke(
+            cli,
+            [
+                "init",
+                "--org-config",
+                "custom/org",
+                "--team-config",
+                "custom/teams",
+                "--force",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert captured["kwargs"]["org_dir"] == Path("custom/org")
+        assert captured["kwargs"]["team_dir"] == Path("custom/teams")
+        assert captured["kwargs"]["force"] is True
+
+    def test_cn3_keyboard_interrupt_exits_one(
+        self, runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """CN3: a Ctrl-C mid-wizard exits 1 with a cancellation message."""
+
+        def _interrupt(*args: Any, **kwargs: Any) -> None:
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr("jiramator.cli.run_init", _interrupt)
+        result = runner.invoke(cli, ["init"])
+        assert result.exit_code == 1
+        assert "cancelled" in result.output.lower()
+
+    def test_cn4_help_describes_wizard(self, runner: CliRunner) -> None:
+        """CN4: `init --help` documents the setup wizard."""
+        result = runner.invoke(cli, ["init", "--help"])
+        assert result.exit_code == 0
+        assert "wizard" in result.output.lower()
+        assert "--force" in result.output

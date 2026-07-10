@@ -1,9 +1,27 @@
 # Proposal: A Jiramator MCP Server
 
-**Status:** Draft for discussion
+**Status:** Reviewed — **Declined / deprioritized** (2026-07-10)
 **Author:** Jiramator maintainers
 **Audience:** Anyone deciding whether/how to expose Jiramator to non-technical
 users; engineers who would build it.
+
+---
+
+> **Review outcome (2026-07-10):** This proposal was reviewed and **not adopted
+> as the primary accessibility path**. An MCP server is well-engineered but does
+> not remove the real on-ramp barriers (installing Python, minting a Jira token,
+> hand-editing YAML with raw custom-field IDs) — to use MCP a user needs all of
+> those *plus* an MCP client. The barriers were instead addressed directly by:
+> (1) the `jiramator init` setup wizard (auto-discovers field IDs, writes
+> config), and (2) the non-interactive planner refactor (`--pi-number` /
+> `--versions` / `--yes`). This document is retained as a design artifact; the
+> salvaged non-interactive core shipped in v1.0.1 and the wizard in v1.1.0.
+>
+> _Correction:_ an earlier draft of this proposal cited a
+> `.planning/PROJECT.md` line stating "MCP is the preferred primary API path."
+> That file and quote do not exist; the actual motivation traces to
+> `REQUIREMENTS.md` (INTG-01), and `.planning/research/PITFALLS.md` in fact
+> **warns against** treating MCP as the primary path.
 
 ---
 
@@ -18,8 +36,10 @@ safety model, and requires no new Jira logic. The `import` and `update` cores ar
 already non-interactive and essentially MCP-ready; only `plan` needs a small,
 well-contained refactor.
 
-This direction matches the project's stated plan: `.planning/PROJECT.md` lists
-**"MCP is the preferred primary API path going forward, with REST as fallback."**
+This direction was originally motivated by `REQUIREMENTS.md` (INTG-01, exposing
+plan/import as MCP tools). **Note:** see the review-outcome banner at the top of
+this document — this path was ultimately declined in favor of the setup wizard
+and non-interactive CLI.
 
 ---
 
