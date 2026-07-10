@@ -1,0 +1,164 @@
+# =============================================================================
+# SPIKE: Jiramator PI Planning via a GitHub Actions form
+# =============================================================================
+# Goal of this spike: let a non-technical PO / scrum master run Jiramator with
+# ZERO local setup — no Python, no pip, no API token on their machine, no
+# terminal. They open the Actions tab, click "Run workflow", fill in a form,
+# and read the preview in the run summary. A second run (mode=create) actually
+# writes to Jira, gated behind a typed confirmation.
+#
+# This is a PROTOTYPE, not production. It demonstrates the "workflow_dispatch
+# form" alternative from docs/mcp-server-proposal.md's review. It drives the
+# CLI fully non-interactively via the --pi-number / --versions / --yes flags
+# (added by the plan_preview refactor), so there is no stdin hack.
+# =============================================================================
+
+name: "Jiramator Plan (spike)"
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "preview (dry-run, safe) or create (writes to Jira)"
+        type: choice
+        options: [preview, create]
+        default: preview
+        required: true
+      pi_number:
+        description: "PI number (e.g. 29)"
+        type: string
+        required: true
+      versions:
+        description: "Comma-separated fix versions (e.g. 26.2.1,26.2.2)"
+        type: string
+        required: true
+      sprints_exist:
+        description: "Do the sprints for this PI already exist in Jira?"
+        type: choice
+        options: ["true", "false"]
+        default: "false"
+        required: true
+      team_config:
+        description: "Path to team config file or directory"
+        type: string
+        default: "tests/fixtures/teams/calcs.yaml"
+        required: true
+      org_config:
+        description: "Path to org config file or directory"
+        type: string
+        default: "configs/org.example/example.yaml"
+        required: true
+      confirm_create:
+        description: "Type CREATE to allow mode=create to write to Jira"
+        type: string
+        default: ""
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  # Never run two writing plans for the same PI concurrently.
+  group: jiramator-plan-${{ inputs.pi_number }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: "${{ inputs.mode }} — PI ${{ inputs.pi_number }}"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install Jiramator
+        run: python -m pip install --upgrade pip && pip install -e .
+
+      - name: Guard create mode
+        if: ${{ inputs.mode == 'create' }}
+        run: |
+          if [ "${{ inputs.confirm_create }}" != "CREATE" ]; then
+            echo "::error::mode=create requires 'confirm_create' to be exactly CREATE. Aborting before any Jira write."
+            exit 1
+          fi
+
+      - name: Resolve sprints flag
+        id: flags
+        run: |
+          if [ "${{ inputs.sprints_exist }}" = "true" ]; then
+            echo "sprints=--sprints-exist" >> "$GITHUB_OUTPUT"
+          else
+            echo "sprints=--no-sprints-exist" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run Jiramator (preview)
+        if: ${{ inputs.mode == 'preview' }}
+        run: |
+          set -o pipefail
+          jiramator plan \
+            -o "${{ inputs.org_config }}" \
+            -t "${{ inputs.team_config }}" \
+            --pi-number "${{ inputs.pi_number }}" \
+            --versions "${{ inputs.versions }}" \
+            --dry-run \
+            ${{ steps.flags.outputs.sprints }} \
+            --report .jiramator/runs/plan.json \
+            2>&1 | tee run-output.txt
+
+      - name: Run Jiramator (create)
+        if: ${{ inputs.mode == 'create' }}
+        env:
+          JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
+          JIRA_TOKEN: ${{ secrets.JIRA_TOKEN }}
+        run: |
+          set -o pipefail
+          jiramator plan \
+            -o "${{ inputs.org_config }}" \
+            -t "${{ inputs.team_config }}" \
+            --pi-number "${{ inputs.pi_number }}" \
+            --versions "${{ inputs.versions }}" \
+            ${{ steps.flags.outputs.sprints }} \
+            --yes \
+            --report .jiramator/runs/plan.json \
+            2>&1 | tee run-output.txt
+
+      - name: Write run summary
+        if: ${{ always() }}
+        run: |
+          {
+            echo "## Jiramator ${{ inputs.mode }} — PI ${{ inputs.pi_number }}"
+            echo ""
+            echo "- **Team config:** \`${{ inputs.team_config }}\`"
+            echo "- **Versions:** \`${{ inputs.versions }}\`"
+            echo "- **Sprints exist:** \`${{ inputs.sprints_exist }}\`"
+            echo ""
+            echo '```'
+            cat run-output.txt 2>/dev/null || echo "(no output captured)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload run report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: jiramator-run-report
+          path: .jiramator/runs/
+          if-no-files-found: ignore
+
+# =============================================================================
+# Spike notes / known rough edges (for the review, not for production):
+#
+# 1. Config availability — defaults point at the shipped example/fixture configs
+#    so this runs out-of-the-box in preview. Real teams live in configs/teams/
+#    (gitignored); a production version would commit team configs to a private
+#    repo or fetch them from a secure store.
+# 2. Credentials — create mode reads JIRA_EMAIL / JIRA_TOKEN from repo secrets,
+#    so the PO never handles a token. Add them under Settings → Secrets.
+# 3. No preview→create drift gate here — the CLI already refuses stale --resume
+#    runs; a production form would carry a preview token between the two runs.
+# =============================================================================
