@@ -43,6 +43,7 @@ from jiramator.updater import (
     run_update,
     validate_unique_issue_keys,
 )
+from jiramator.wizard import run_init
 
 console = Console(stderr=True)
 
@@ -234,6 +235,53 @@ def _update_report_from_result(
 @click.version_option(package_name="jiramator")
 def cli() -> None:
     """Jiramator — config-driven Jira ticket automation."""
+
+
+@cli.command()
+@click.option(
+    "--org-config",
+    "-o",
+    "org_config_dir",
+    type=click.Path(path_type=Path),
+    default=Path("./configs/org/"),
+    show_default=True,
+    help="Directory to write the generated org config into.",
+)
+@click.option(
+    "--team-config",
+    "-t",
+    "team_config_dir",
+    type=click.Path(path_type=Path),
+    default=Path("./configs/teams/"),
+    show_default=True,
+    help="Directory to write the generated team config into.",
+)
+@click.option(
+    "--force",
+    "force",
+    is_flag=True,
+    default=False,
+    help="Overwrite existing config files without asking.",
+)
+def init(org_config_dir: Path, team_config_dir: Path, force: bool) -> None:
+    """Interactive setup wizard — connect to Jira and generate your configs.
+
+    Run this first. It connects to Jira, auto-discovers your custom field IDs,
+    validates your project, and writes a ready-to-use org config plus a
+    commented team-config skeleton — no hand-editing of raw field IDs required.
+    """
+    try:
+        run_init(
+            console,
+            org_dir=org_config_dir,
+            team_dir=team_config_dir,
+            force=force,
+        )
+    except KeyboardInterrupt:
+        console.print("\n[red]Setup cancelled.[/]")
+        sys.exit(1)
+    except JiraApiError as exc:
+        _fail(f"Jira error during setup: {exc}")
 
 
 @cli.command()
