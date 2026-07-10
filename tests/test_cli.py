@@ -232,6 +232,98 @@ class TestPlanCommandFlags:
         assert stub_run_plan["kwargs"]["force"] is True
         assert stub_run_plan["kwargs"]["prior_report"] is None
 
+    def test_C15_pi_number_and_versions_build_inputs(
+        self,
+        runner: CliRunner,
+        stub_run_plan: dict[str, Any],
+        org_config_path: Path,
+        team_config_path: Path,
+    ) -> None:
+        result = runner.invoke(
+            cli,
+            _plan_args(
+                org_config_path,
+                team_config_path,
+                "--pi-number",
+                "29",
+                "--versions",
+                "26.2.1, 26.2.2",
+            ),
+        )
+
+        assert result.exit_code == 0, result.stderr
+        inputs = stub_run_plan["kwargs"]["inputs"]
+        assert inputs is not None
+        assert inputs.pi_num == "29"
+        assert inputs.pi_label == "PI29"
+        assert inputs.versions == ["26.2.1", "26.2.2"]
+
+    def test_C16_no_input_flags_leaves_inputs_none(
+        self,
+        runner: CliRunner,
+        stub_run_plan: dict[str, Any],
+        org_config_path: Path,
+        team_config_path: Path,
+    ) -> None:
+        result = runner.invoke(cli, _plan_args(org_config_path, team_config_path))
+
+        assert result.exit_code == 0, result.stderr
+        assert stub_run_plan["kwargs"]["inputs"] is None
+        assert stub_run_plan["kwargs"]["assume_yes"] is False
+
+    def test_C17_yes_flag_sets_assume_yes(
+        self,
+        runner: CliRunner,
+        stub_run_plan: dict[str, Any],
+        org_config_path: Path,
+        team_config_path: Path,
+    ) -> None:
+        result = runner.invoke(
+            cli, _plan_args(org_config_path, team_config_path, "--yes")
+        )
+
+        assert result.exit_code == 0, result.stderr
+        assert stub_run_plan["kwargs"]["assume_yes"] is True
+
+    def test_C18_pi_number_without_versions_exits_1(
+        self,
+        runner: CliRunner,
+        stub_run_plan: dict[str, Any],
+        org_config_path: Path,
+        team_config_path: Path,
+    ) -> None:
+        result = runner.invoke(
+            cli,
+            _plan_args(org_config_path, team_config_path, "--pi-number", "29"),
+        )
+
+        assert result.exit_code == 1
+        assert "must be provided together" in result.stderr
+        assert "kwargs" not in stub_run_plan  # run_plan was not called
+
+    def test_C19_empty_pi_number_exits_1(
+        self,
+        runner: CliRunner,
+        stub_run_plan: dict[str, Any],
+        org_config_path: Path,
+        team_config_path: Path,
+    ) -> None:
+        result = runner.invoke(
+            cli,
+            _plan_args(
+                org_config_path,
+                team_config_path,
+                "--pi-number",
+                "",
+                "--versions",
+                "26.2.1",
+            ),
+        )
+
+        assert result.exit_code == 1
+        assert "PI number cannot be empty" in result.stderr
+        assert "kwargs" not in stub_run_plan
+
 
 # ---------------------------------------------------------------------------
 # Task 1 — error handling (C8-C14)

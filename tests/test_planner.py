@@ -22,6 +22,7 @@ from jiramator.config import (
 )
 from jiramator.jira_client import JiraApiError, JiraClient
 from jiramator.planner import (
+    PlanInputs,
     _check_and_create_fix_versions,
     _create_epics,
     _create_tickets_bulk,
@@ -31,6 +32,9 @@ from jiramator.planner import (
     _extract_summary,
     _prompt_pi_number,
     _prompt_fix_versions,
+    make_plan_inputs,
+    normalize_pi_number,
+    normalize_versions,
     run_plan,
 )
 
@@ -653,3 +657,123 @@ class TestPromptHelpers:
     def test_prompt_fix_versions_empty_string_exits(self, mock_int, mock_prompt, console):
         with pytest.raises(SystemExit):
             _prompt_fix_versions(console)
+
+
+# ---------------------------------------------------------------------------
+# PlanInputs normalization (non-interactive)
+# ---------------------------------------------------------------------------
+
+
+class TestNormalizePiNumber:
+    def test_bare_number_returns_label(self):
+        assert normalize_pi_number("29") == ("29", "PI29")
+
+    def test_pi_prefix_stripped(self):
+        assert normalize_pi_number("PI29") == ("29", "PI29")
+
+    def test_lowercase_pi_prefix_normalized(self):
+        assert normalize_pi_number("pi29") == ("29", "PI29")
+
+    def test_whitespace_stripped(self):
+        assert normalize_pi_number("  42 ") == ("42", "PI42")
+
+    def test_empty_raises_valueerror(self):
+        with pytest.raises(ValueError):
+            normalize_pi_number("")
+
+    def test_bare_prefix_raises_valueerror(self):
+        with pytest.raises(ValueError):
+            normalize_pi_number("PI")
+
+
+class TestNormalizeVersions:
+    def test_strips_each_entry(self):
+        assert normalize_versions([" 26.2.1 ", "26.2.2"]) == ["26.2.1", "26.2.2"]
+
+    def test_empty_entry_raises_valueerror(self):
+        with pytest.raises(ValueError):
+            normalize_versions(["26.2.1", "  "])
+
+    def test_empty_list_raises_valueerror(self):
+        with pytest.raises(ValueError):
+            normalize_versions([])
+
+
+class TestMakePlanInputs:
+    def test_builds_validated_inputs(self):
+        inputs = make_plan_inputs("PI29", ["26.2.1", " 26.2.2 "])
+        assert inputs == PlanInputs(
+            pi_num="29", pi_label="PI29", versions=["26.2.1", "26.2.2"]
+        )
+
+    def test_invalid_pi_raises_valueerror(self):
+        with pytest.raises(ValueError):
+            make_plan_inputs("", ["26.2.1"])
+
+    def test_invalid_versions_raises_valueerror(self):
+        with pytest.raises(ValueError):
+            make_plan_inputs("29", ["  "])
+
+
+# ---------------------------------------------------------------------------
+# run_plan — non-interactive (inputs=, assume_yes=)
+# ---------------------------------------------------------------------------
+
+
+class TestRunPlanNonInteractive:
+    """Providing PlanInputs skips prompts; assume_yes skips confirmations."""
+
+    @patch("jiramator.planner.Prompt.ask")
+    @patch("jiramator.planner.IntPrompt.ask")
+    def test_inputs_skip_prompts_in_dry_run(
+        self, mock_int_prompt, mock_prompt, org_config, team_config, console
+    ):
+        """With inputs= supplied, no Rich prompts are invoked."""
+        inputs = make_plan_inputs("28", ["26.1.1"])
+        with patch("jiramator.planner.JiraClient") as mock_jira_cls:
+            run_plan(
+                org_config, team_config, dry_run=True, console=console, inputs=inputs
+            )
+            mock_jira_cls.assert_not_called()
+        mock_prompt.assert_not_called()
+        mock_int_prompt.assert_not_called()
+
+    @patch("jiramator.planner.Confirm.ask")
+    @patch("jiramator.planner.JiraClient")
+    def test_assume_yes_skips_confirmations(
+        self, mock_jira_cls, mock_confirm, org_config, team_config, console
+    ):
+        """With assume_yes, run_plan creates without any Confirm prompt."""
+        mock_client = MagicMock()
+        mock_jira_cls.return_value = mock_client
+        mock_client.get_fix_versions.return_value = []
+        mock_client.create_fix_version.return_value = {"name": "26.1.1", "id": "100"}
+        mock_client.create_issue.return_value = "TST-500"
+        mock_client.create_issues_bulk.return_value = ["TST-501", "TST-502"]
+
+        inputs = make_plan_inputs("28", ["26.1.1"])
+        run_plan(
+            org_config,
+            team_config,
+            dry_run=False,
+            console=console,
+            inputs=inputs,
+            assume_yes=True,
+        )
+
+        mock_confirm.assert_not_called()
+        mock_client.create_fix_version.assert_called_once_with("TST", "26.1.1")
+        assert mock_client.create_issues_bulk.call_count >= 1
+
+
+class TestCheckAndCreateFixVersionsAssumeYes:
+    def test_assume_yes_creates_without_confirm(self, mock_client, console):
+        """assume_yes creates missing versions with no Confirm prompt."""
+        mock_client.get_fix_versions.return_value = []
+        mock_client.create_fix_version.return_value = {"name": "26.1.1", "id": "100"}
+        with patch("jiramator.planner.Confirm.ask") as mock_confirm:
+            _check_and_create_fix_versions(
+                mock_client, "TST", ["26.1.1"], console, assume_yes=True
+            )
+            mock_confirm.assert_not_called()
+        mock_client.create_fix_version.assert_called_once_with("TST", "26.1.1")
