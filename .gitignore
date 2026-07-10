@@ -35,6 +35,9 @@ Thumbs.db
 # Local organization-specific Jira config
 configs/org/
 
+# Local team-specific Jiramator config (real project keys, epics, etc.)
+configs/teams/
+
 # Hermes agent state (not part of the project)
 .hermes/
 

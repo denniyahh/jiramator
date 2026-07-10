@@ -27,7 +27,8 @@ from jiramator.ticket_builder import build_all, build_epics
 # ---------------------------------------------------------------------------
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _ORG_CONFIG_PATH = _REPO_ROOT / "configs" / "org.example" / "example.yaml"
-_TEAM_CONFIG_PATH = _REPO_ROOT / "configs" / "teams" / "calcs.yaml"
+# Tracked test fixture (configs/teams/ is gitignored personal/team config).
+_TEAM_CONFIG_PATH = _REPO_ROOT / "tests" / "fixtures" / "teams" / "calcs.yaml"
 
 # ---------------------------------------------------------------------------
 # Runtime parameters for test scenario
