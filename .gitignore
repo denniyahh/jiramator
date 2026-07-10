@@ -35,6 +35,9 @@ Thumbs.db
 # Local organization-specific Jira config
 configs/org/
 
+# Local team-specific Jiramator config (real project keys, epics, etc.)
+configs/teams/
+
 # Hermes agent state (not part of the project)
 .hermes/
 
@@ -43,3 +46,9 @@ configs/org/
 
 # Run reports (FOUND-02)
 .jiramator/
+
+# Personal working artifacts kept at repo root as samples — not for commit.
+# Exact-name matches only; does not affect tracked files elsewhere (tests/, scripts/).
+/Jira.xlsx
+/PI28 Stories.docx
+/create_pi28_jiras.py

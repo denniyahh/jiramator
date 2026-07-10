@@ -7,10 +7,10 @@ belongs to the planner, not tested here) is absent.
 
 Test scenario: PI28, versions [26.1.1, 26.1.2, 26.2.0].
 Expected output:
-    2 epics  (bau, misc)
+    0 epics  (bau + misc are reused via existing_epics, not created)
     6 per-release templates × 3 versions = 18 per-release tickets
     1 per-sprint template × (5 standard + 2 long-sprint) = 7 per-sprint tickets
-    Total: 27 payloads
+    Total: 25 payloads
 """
 
 from __future__ import annotations
@@ -27,7 +27,8 @@ from jiramator.ticket_builder import build_all, build_epics
 # ---------------------------------------------------------------------------
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _ORG_CONFIG_PATH = _REPO_ROOT / "configs" / "org.example" / "example.yaml"
-_TEAM_CONFIG_PATH = _REPO_ROOT / "configs" / "teams" / "calcs.yaml"
+# Tracked test fixture (configs/teams/ is gitignored personal/team config).
+_TEAM_CONFIG_PATH = _REPO_ROOT / "tests" / "fixtures" / "teams" / "calcs.yaml"
 
 # ---------------------------------------------------------------------------
 # Runtime parameters for test scenario

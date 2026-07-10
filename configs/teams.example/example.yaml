@@ -1,0 +1,58 @@
+# Example team-level Jiramator configuration
+#
+# Copy this file into configs/teams/ (gitignored — personal/team-specific)
+# and edit it for your own project, board, and ticket templates.
+#
+# Defines recurring epics and ticket templates for each PI.
+# All {variables} are interpolated at runtime by the ticket builder.
+
+project_key: PROJ
+team_name: MyTeam
+board_id: 123
+sprint_name_template: "PI-{pi_num}.{sprint_num}-MyTeam"
+
+release_sprint_map:
+  "1.0.0":
+    pre: 1
+    post: 2
+  "1.1.0":
+    pre: 3
+    post: 4
+
+existing_epics:
+  bau: PROJ-1
+  misc: PROJ-2
+
+# ---------------------------------------------------------------------------
+# Epics created at the start of each PI
+# ---------------------------------------------------------------------------
+recurring_epics: []
+
+# ---------------------------------------------------------------------------
+# Tickets generated once per release version
+# e.g. if PI28 has versions 1.0.0, 1.1.0 → 1 template x 2 = 2 tickets
+# ---------------------------------------------------------------------------
+per_release_tickets:
+  - summary: "Testing - {version} Regression test"
+    sprint_group: "pre"
+    fields:
+      issuetype: Task
+      priority: Medium
+      labels: ["{pi_label}", "Testing"]
+      fixVersions: ["{version}"]
+      customfield_10014: "$epic:misc"   # epic link -> Miscellaneous epic
+
+# ---------------------------------------------------------------------------
+# Tickets generated once per sprint
+# Standard sprints: 1 ticket each. Long sprints: extra tickets with suffix.
+# ---------------------------------------------------------------------------
+per_sprint_tickets:
+  - summary: "Misc - Prod Support (Sprint {sprint_num})"
+    fields:
+      issuetype: Task
+      priority: Medium
+      labels: ["{pi_label}", "Prod_Support"]
+      fixVersions: ["{pi_label}"]
+      customfield_10014: "$epic:misc"
+    extra_on_long_sprint: 1
+    long_sprint_suffix: ["a", "b"]   # e.g. Sprint 6 -> "Sprint 6a" + "Sprint 6b"

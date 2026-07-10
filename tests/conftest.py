@@ -16,5 +16,10 @@ def org_config_path():
 
 @pytest.fixture
 def team_config_path():
-    """Path to the Calcs team config."""
-    return CONFIGS_DIR / "teams" / "calcs.yaml"
+    """Path to the Calcs team config fixture.
+
+    Lives under tests/fixtures/ (tracked) rather than configs/teams/
+    (gitignored, personal/team-specific) so the test suite is reproducible
+    on a fresh clone regardless of local config state.
+    """
+    return FIXTURES_DIR / "teams" / "calcs.yaml"

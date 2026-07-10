@@ -687,8 +687,7 @@ class TestExistingEpics:
             per_release_tickets=[
                 TicketTemplate(
                     summary="Task",
-                    issuetype="Story",
-                    fields={"customfield_10014": "$epic:bau"},
+                    fields={"issuetype": "Story", "customfield_10014": "$epic:bau"},
                 ),
             ],
         )
@@ -709,8 +708,7 @@ class TestExistingEpics:
                 per_release_tickets=[
                     TicketTemplate(
                         summary="Task",
-                        issuetype="Story",
-                        fields={"customfield_10014": "$epic:unknown"},
+                        fields={"issuetype": "Story", "customfield_10014": "$epic:unknown"},
                     ),
                 ],
             )
