@@ -47,11 +47,17 @@ from jiramator.updater import (
 console = Console(stderr=True)
 
 
-def _resolve_org_config_path(path: Path) -> Path:
-    """Resolve an org config path that might be a file or directory.
+def _resolve_config_dir_path(path: Path, *, kind: str, flag: str) -> Path:
+    """Resolve a config path that might be a file or directory.
 
     If *path* is a directory, we look for exactly one .yaml/.yml file inside it.
     If *path* is a file, we return it as-is.
+
+    Args:
+        path: The file or directory to resolve.
+        kind: Human-readable label for error messages (e.g. "Org", "Team").
+        flag: The CLI flag name to suggest when a directory is ambiguous
+              (e.g. "--org-config", "--team-config").
 
     Raises:
         click.BadParameter: If the path is invalid or ambiguous.
@@ -72,17 +78,27 @@ def _resolve_org_config_path(path: Path) -> Path:
 
         if len(unique) == 0:
             raise click.BadParameter(
-                f"No .yaml/.yml files found in org config directory: {path}"
+                f"No .yaml/.yml files found in {kind.lower()} config directory: {path}"
             )
         if len(unique) > 1:
             names = ", ".join(c.name for c in unique)
             raise click.BadParameter(
-                f"Multiple org config files found in {path}: {names}. "
-                f"Specify the exact file with --org-config."
+                f"Multiple {kind.lower()} config files found in {path}: {names}. "
+                f"Specify the exact file with {flag}."
             )
         return unique[0]
 
-    raise click.BadParameter(f"Org config path does not exist: {path}")
+    raise click.BadParameter(f"{kind} config path does not exist: {path}")
+
+
+def _resolve_org_config_path(path: Path) -> Path:
+    """Resolve an org config path that might be a file or directory."""
+    return _resolve_config_dir_path(path, kind="Org", flag="--org-config")
+
+
+def _resolve_team_config_path(path: Path) -> Path:
+    """Resolve a team config path that might be a file or directory."""
+    return _resolve_config_dir_path(path, kind="Team", flag="--team-config")
 
 
 def _fail(message: str) -> None:
@@ -235,8 +251,9 @@ def cli() -> None:
     "-t",
     "team_config_path",
     type=click.Path(exists=True, path_type=Path),
-    required=True,
-    help="Path to team config YAML file.",
+    default=Path("./configs/teams/"),
+    show_default=True,
+    help="Path to team config file, or a directory containing exactly one.",
 )
 @click.option(
     "--dry-run",
@@ -301,10 +318,11 @@ def plan(
         _fail(f"Org config error: {exc}")
 
     try:
+        team_config_path = _resolve_team_config_path(team_config_path)
         team_config, team_tagged = load_team_config(team_config_path)
     except ConfigValidationError as exc:
         _fail(str(exc))
-    except (FileNotFoundError, ValueError) as exc:
+    except (click.BadParameter, FileNotFoundError, ValueError) as exc:
         _fail(f"Team config error: {exc}")
 
     # -- Apply Phase 02-02 layered merge: org → team-defaults → templates --
@@ -367,8 +385,9 @@ def plan(
     "-t",
     "team_config_path",
     type=click.Path(exists=True, path_type=Path),
-    required=True,
-    help="Path to team config YAML file.",
+    default=Path("./configs/teams/"),
+    show_default=True,
+    help="Path to team config file, or a directory containing exactly one.",
 )
 @click.option(
     "--sheet-name",
@@ -452,10 +471,11 @@ def import_command(
         _fail(f"Org config error: {exc}")
 
     try:
+        team_config_path = _resolve_team_config_path(team_config_path)
         team_config, _ = load_team_config(team_config_path)
     except ConfigValidationError as exc:
         _fail(str(exc))
-    except (FileNotFoundError, ValueError) as exc:
+    except (click.BadParameter, FileNotFoundError, ValueError) as exc:
         _fail(f"Team config error: {exc}")
 
     try:

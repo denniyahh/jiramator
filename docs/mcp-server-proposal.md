@@ -305,7 +305,7 @@ mock only the HTTP boundary):
   formats results correctly, mocking `run_plan`/`run_import`/`run_update`.
 - **Token/drift tests** — `create_*` rejects a missing or stale `preview_token`.
 - **Reuse integration fixtures** — point `preview_plan` at the shipped
-  `configs/org.example/example.yaml` + `configs/teams/calcs.yaml` and assert the same
+  `configs/org.example/example.yaml` + `tests/fixtures/teams/calcs.yaml` and assert the same
   counts the current integration suite checks (**0 epics, 18 per-release, 7
   per-sprint = 25** for the shipped 3-version scenario).
 - **Protocol smoke test** — start the stdio server, list tools, call one read-only

@@ -31,7 +31,7 @@ Five-layer design with strict separation of concerns:
 
 **Data flow:** `cli.py` loads configs → hands off to `planner.run_plan()` → calls `ticket_builder.build_all()` twice (once for preview with empty epic keys, once with real Jira keys after epics are created) → uses `JiraClient` for all API calls.
 
-**Two-tier config model:** Local org config (`configs/org/`, gitignored) holds Jira URL, custom field IDs, sprint cadence. Shipped org examples live in `configs/org.example/`. Team config (`configs/teams/`) holds project key, epic definitions, and ticket templates. Both are Pydantic models loaded via `load_org_config()` / `load_team_config()`.
+**Two-tier config model:** Local org config (`configs/org/`, gitignored) holds Jira URL, custom field IDs, sprint cadence. Shipped org examples live in `configs/org.example/`. Team config (`configs/teams/`, gitignored) holds project key, epic definitions, and ticket templates. Shipped team examples live in `configs/teams.example/`. Both org and team config directories are Pydantic models loaded via `load_org_config()` / `load_team_config()`. Both `--org-config` and `--team-config` CLI flags accept a directory and auto-resolve to the single `.yaml`/`.yml` file inside it (defaults: `./configs/org/`, `./configs/teams/`).
 
 ## Key Conventions
 
@@ -66,7 +66,7 @@ Test classes are named `Test<ComponentName>`, test functions follow `test_<behav
 - **Mock Rich prompts** with `@patch("jiramator.planner.Confirm.ask")` etc.
 - **Mock env vars** with pytest `monkeypatch.setenv` / `monkeypatch.delenv`.
 - **Do not mock** Pydantic validation, config YAML loading, or ticket builder logic — test those with real inputs.
-- Integration tests in `test_integration.py` use the shipped `configs/org.example/example.yaml` and `configs/teams/calcs.yaml` via `scope="module"` fixtures. Exact ticket counts (0 epics — `bau`/`misc` are reused via `existing_epics` — 18 per-release, 7 per-sprint = 25 total) are asserted.
+- Integration tests in `test_integration.py` use the shipped `configs/org.example/example.yaml` and the tracked fixture `tests/fixtures/teams/calcs.yaml` (a copy of the real Calcs team config, kept as a stable test fixture since `configs/teams/` is gitignored) via `scope="module"` fixtures. Exact ticket counts (0 epics — `bau`/`misc` are reused via `existing_epics` — 18 per-release, 7 per-sprint = 25 total) are asserted.
 
 Per-file fixtures are defined at the top of each test file. Shared path fixtures live in `tests/conftest.py`.
 

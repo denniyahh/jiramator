@@ -82,20 +82,31 @@ you can preview a plan before you ever create a token.
 Copy the example configs and edit them for your organization and team:
 
 ```bash
-mkdir -p configs/org
-cp configs/org.example/example.yaml  configs/org/mycompany.yaml
-cp configs/teams/calcs.yaml          configs/teams/myteam.yaml
+mkdir -p configs/org configs/teams
+cp configs/org.example/example.yaml     configs/org/mycompany.yaml
+cp configs/teams.example/example.yaml   configs/teams/myteam.yaml
 ```
 
 Two org examples ship in `configs/org.example/`: `example.yaml` is a minimal
 starting point, and `marketaxess.yaml` is a fuller, production-shaped
 reference (real custom field IDs, a populated `bulk_create` block) — use
-whichever is closer to your own setup. `configs/org/` is gitignored, so your
-real org config never leaves your machine.
+whichever is closer to your own setup. `configs/teams.example/example.yaml`
+is the analogous starting point for a team config. Both `configs/org/` and
+`configs/teams/` are gitignored, so your real configs never leave your
+machine or get committed to the shared repo.
 
 See [Config Reference](#config-reference) below for the full schema.
 
 ### 4. Run
+
+If `configs/org/` and `configs/teams/` each contain exactly one file, both
+`--org-config` and `--team-config` can be omitted entirely:
+
+```bash
+jiramator plan --dry-run
+```
+
+Or specify paths explicitly (useful with multiple teams/orgs, or CI):
 
 ```bash
 # Dry run — preview what would be created, no API calls
@@ -107,6 +118,7 @@ jiramator plan --org-config configs/org/mycompany.yaml \
 jiramator plan --org-config configs/org/mycompany.yaml \
                --team-config configs/teams/myteam.yaml
 ```
+
 
 The `plan` command walks you through an interactive flow:
 
@@ -148,7 +160,7 @@ jiramator plan --org-config configs/org/mycompany.yaml \
 | Flag | Description |
 |---|---|
 | `-o, --org-config PATH` | Org config file, or a directory containing exactly one (default: `./configs/org/`) |
-| `-t, --team-config PATH` | Team config YAML file (**required**) |
+| `-t, --team-config PATH` | Team config file, or a directory containing exactly one (default: `./configs/teams/`) |
 | `-n, --dry-run` | Preview the ticket set and exit without creating anything |
 | `--sprints-exist / --no-sprints-exist` | Whether this PI's sprints already exist in Jira. Overrides the `sprints_exist:` config field. `--no-sprints-exist` skips the Jira board lookup entirely |
 | `--report PATH` | Where to write the run report (default: `.jiramator/runs/<UTC>-<team>.json`) |
@@ -189,7 +201,7 @@ jiramator import --org-config configs/org/mycompany.yaml \
 
 Important:
 - The target Jira project is not hardcoded in the application. `import` uses `team_config.project_key` from the selected team config.
-- The shipped `configs/teams/calcs.yaml` example happens to target `CA`, but that is configuration, not product logic.
+- Team configs are project-specific by nature — set `project_key` to your own Jira project, not product logic.
 - `spreadsheet_path` is a required positional argument. There is no `--file` flag in the current implementation.
 - `--sheet-name` applies only to `.xlsx` imports.
 
@@ -198,7 +210,7 @@ Important:
 | Flag | Description |
 |---|---|
 | `-o, --org-config PATH` | Org config file or directory (default: `./configs/org/`) |
-| `-t, --team-config PATH` | Team config YAML file (**required** — supplies `project_key`) |
+| `-t, --team-config PATH` | Team config file or directory — supplies `project_key` (default: `./configs/teams/`) |
 | `-n, --dry-run` | Preview payloads and exit without creating issues |
 | `--sheet-name NAME` | Worksheet name for `.xlsx` inputs (defaults to the first sheet) |
 | `--max-rows N` | Read at most `N` spreadsheet rows (handy during bring-up) |
@@ -388,6 +400,10 @@ Jiramator uses a two-tier configuration model:
   IDs, sprint cadence)
 - **Team config** — specific to one team (project key, epic definitions, ticket
   templates)
+
+Both are gitignored under `configs/org/` and `configs/teams/` respectively —
+real configs stay local to your machine. Shipped examples live in
+`configs/org.example/` and `configs/teams.example/`.
 
 ### Org Config
 
@@ -630,8 +646,8 @@ You write simple values in your config; the builder handles the rest.
 
 ## Creating Custom Team Configs
 
-1. **Start from an example:** Copy `configs/teams/calcs.yaml` as a starting
-   point.
+1. **Start from an example:** Copy `configs/teams.example/example.yaml` into
+   `configs/teams/` as a starting point.
 
 2. **Set your project key and team name:** These are the only required team-level routing fields. Jiramator sends issues to the Jira project named by `team_config.project_key`; it does not hardcode a project like `CA` in application logic.
 

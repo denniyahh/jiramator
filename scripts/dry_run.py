@@ -4,7 +4,7 @@ from jiramator.config import load_org_config, load_team_config
 from jiramator.ticket_builder import build_all
 
 org, _ = load_org_config("configs/org.example/example.yaml")
-team, _ = load_team_config("configs/teams/calcs.yaml")
+team, _ = load_team_config("tests/fixtures/teams/calcs.yaml")
 
 result = build_all(
     org, team,
