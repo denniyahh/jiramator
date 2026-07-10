@@ -45,29 +45,35 @@ touches nothing in Jira until you confirm.
 
 ### 1. Install
 
-**Prerequisites:**
-- Python 3.11 or newer ([python.org/downloads](https://www.python.org/downloads/)).
-  Check with `python3 --version` (Windows: `py --version`).
-- Git ([git-scm.com/downloads](https://git-scm.com/downloads)). If you'd rather
-  not install Git, click the green **Code → Download ZIP** button on the
-  [GitHub repo page](https://github.com/dkim_mktx/jiramator) instead, then
-  extract it and open a terminal in that folder.
+**Prerequisite:** Python 3.11 or newer
+([python.org/downloads](https://www.python.org/downloads/)). Check with
+`python3 --version` (Windows: `py --version`).
+
+**Recommended — install with [pipx](https://pipx.pypa.io)** (one command, no
+virtual environment to manage, gives you a global `jiramator` command):
+
+```bash
+# Install pipx once (see pipx docs for your OS), then:
+pipx install git+https://github.com/dkim_mktx/jiramator.git
+
+# Verify
+jiramator --version
+```
+
+<details>
+<summary><b>Alternative: clone + virtual environment</b> (for development, or if you don't use pipx)</summary>
+
+Also needs Git ([git-scm.com/downloads](https://git-scm.com/downloads)), or use
+the green **Code → Download ZIP** button on the
+[repo page](https://github.com/dkim_mktx/jiramator).
 
 ```bash
 # macOS / Linux
 git clone https://github.com/dkim_mktx/jiramator.git
 cd jiramator
-
-# Create and activate a virtual environment (keeps Jiramator's dependencies
-# isolated, and avoids "externally-managed-environment" pip errors some
-# systems now enforce)
 python3 -m venv .venv
 source .venv/bin/activate
-
-# Install
 pip install -e .
-
-# Verify it worked
 jiramator --version
 ```
 
@@ -75,22 +81,44 @@ jiramator --version
 # Windows PowerShell
 git clone https://github.com/dkim_mktx/jiramator.git
 cd jiramator
-
 py -m venv .venv
 .venv\Scripts\Activate.ps1
-
 pip install -e .
-
 jiramator --version
 ```
 
-`jiramator --version` should print `jiramator, version 1.0.0` (or newer). If
-you instead see `command not found` / `'jiramator' is not recognized`, the
-virtual environment likely isn't activated — re-run the `activate` line above
-(it's shell/session-specific, so you'll need to run it again each time you
-open a new terminal).
+With a virtual environment, you must re-run the `activate` line each time you
+open a new terminal.
 
-### 2. Set credentials
+</details>
+
+### 2. Get set up — the easy way
+
+Run the **setup wizard** and answer a few questions:
+
+```bash
+jiramator init
+```
+
+It connects to Jira, **auto-discovers your custom field IDs by name** (so you
+never copy `customfield_10014` by hand), validates your project, sets up your
+credentials, and writes a ready-to-use org config plus a commented team-config
+skeleton with example tickets. When it finishes, it tells you exactly what to
+do next.
+
+You'll need a Jira API token — create one at
+**[id.atlassian.com/manage-profile/security/api-tokens](https://id.atlassian.com/manage-profile/security/api-tokens)**
+before you start. Then jump to
+[The Three Ways to Use Jiramator](#the-three-ways-to-use-jiramator).
+
+> Prefer to set everything up by hand instead of using the wizard? See
+> **[Manual setup](#manual-setup)** below.
+
+## Manual setup
+
+*(Skip this section if you used `jiramator init` above.)*
+
+### Set credentials
 
 Jiramator reads Jira credentials from environment variables (never from config
 files, so your token is never committed to git). The default variable names are
@@ -118,7 +146,7 @@ never read them, so you can try those out before you ever create a token.
 and live Jira access, because it fetches field metadata to preview how your
 spreadsheet values will be coerced.
 
-### 3. Configure your org and team
+### Configure your org and team
 
 Jiramator splits configuration into two files:
 
