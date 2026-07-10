@@ -32,7 +32,8 @@ def _read_csv(
         # rich.Console here for consistency with the rest of the CLI's
         # styled output, though the message itself is plain text.
         from rich.console import Console
-        Console(stderr=True).print(f"Read {path} as {enc}")
+        # soft_wrap so a long CSV path isn't hard-wrapped across lines.
+        Console(stderr=True).print(f"Read {path} as {enc}", soft_wrap=True)
 
     with path.open(newline="", encoding=enc) as handle:
         reader = csv.DictReader(handle)

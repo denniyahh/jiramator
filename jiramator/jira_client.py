@@ -201,11 +201,13 @@ class JiraClient:
             clauses.append(f'summary ~ "\\"{escaped}\\""')
 
         jql = f'project = "{project_key}" AND (' + " OR ".join(clauses) + ")"
-        response = self._session.get(
-            self._url("/rest/api/3/search"),
-            params={
+        # Jira Cloud removed GET /rest/api/3/search (returns 410 Gone); the
+        # replacement is POST /rest/api/3/search/jql.
+        response = self._session.post(
+            self._url("/rest/api/3/search/jql"),
+            json={
                 "jql": jql,
-                "fields": "summary",
+                "fields": ["summary"],
                 "maxResults": len(unique_summaries),
             },
             timeout=_DEFAULT_TIMEOUT,

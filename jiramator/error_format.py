@@ -20,6 +20,20 @@ import difflib
 from dataclasses import dataclass
 from pathlib import Path
 
+# Exception-internal dunder attributes that the interpreter, contextlib, and
+# frameworks like Click assign directly on a *caught* exception instance
+# (e.g. contextlib's @contextmanager re-raises reassign __traceback__ when
+# normalizing tracebacks across a `yield`). A plain frozen dataclass rejects
+# ALL attribute assignment, including these, which crashes any code path
+# where a ConfigValidationError propagates out of a context manager or
+# generator-based decorator (this is exactly what Click's
+# `augment_usage_errors` does around every command callback). Allow these
+# specific attributes through while keeping the declared dataclass fields
+# genuinely immutable.
+_EXC_INTERNAL_ATTRS = frozenset(
+    {"__traceback__", "__cause__", "__context__", "__suppress_context__", "__notes__"}
+)
+
 
 @dataclass(frozen=True)
 class ConfigValidationError(Exception):
@@ -51,11 +65,36 @@ class ConfigValidationError(Exception):
         return f"{rel}{line_part}: {self.field_path} — {self.reason}{suffix}"
 
     def _relative_to_cwd(self) -> str:
-        """Render ``file`` relative to CWD if possible, else absolute."""
+        """Render ``file`` relative to CWD if possible, else absolute.
+
+        Relative paths use forward slashes (``as_posix``) so error output is
+        identical on Windows, macOS, and Linux. Absolute fallbacks keep the
+        OS-native separator.
+        """
         try:
-            return str(self.file.resolve().relative_to(Path.cwd()))
+            return self.file.resolve().relative_to(Path.cwd()).as_posix()
         except ValueError:
             return str(self.file)
+
+
+# dataclass(frozen=True) refuses to decorate a class that already defines
+# __setattr__ in its own body (it must generate that method itself), so the
+# dunder-attribute carve-out is patched on immediately after class creation
+# instead. This still fully preserves immutability for the declared fields
+# above — only the whitelisted exception-internal attributes bypass it.
+_frozen_setattr = ConfigValidationError.__setattr__
+
+
+def _setattr_allowing_exception_internals(
+    self: ConfigValidationError, name: str, value: object
+) -> None:
+    if name in _EXC_INTERNAL_ATTRS:
+        object.__setattr__(self, name, value)
+        return
+    _frozen_setattr(self, name, value)
+
+
+ConfigValidationError.__setattr__ = _setattr_allowing_exception_internals  # type: ignore[method-assign]
 
 
 def format_loc(loc: tuple[int | str, ...]) -> str:
@@ -164,9 +203,10 @@ class ConfigConflictWarning:
         """Render ``p`` relative to CWD if possible, else absolute.
 
         Mirrors ``ConfigValidationError._relative_to_cwd`` so both
-        formatters render paths identically.
+        formatters render paths identically — relative paths use forward
+        slashes for cross-platform-consistent output.
         """
         try:
-            return str(p.resolve().relative_to(Path.cwd()))
+            return p.resolve().relative_to(Path.cwd()).as_posix()
         except ValueError:
             return str(p)
