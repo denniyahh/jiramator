@@ -18,11 +18,10 @@ flowchart LR
 ```
 
 **Who it's for:** product owners, scrum masters, and tech leads who run PI
-planning. You do not need to be a programmer, but the first-time setup does
-involve editing a config file and creating a Jira API token — see
-[Quick Start](#quick-start). If that feels daunting, ask a developer on your team
-to help with the one-time setup; after that, running it each PI is a single
-command.
+planning. You do not need to be a programmer. First-time setup is a guided
+wizard — `jiramator init` connects to Jira, discovers your field IDs, and
+writes your config for you; you just need to create a Jira API token (the
+wizard links you to the page). See [Quick Start](#quick-start).
 
 **Three things it can do:**
 
