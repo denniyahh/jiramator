@@ -35,6 +35,10 @@ command.
 Everything runs **preview-first**: `--dry-run` shows exactly what would happen and
 touches nothing in Jira until you confirm.
 
+> **Contributing to Jiramator itself?** See [CONTRIBUTING.md](CONTRIBUTING.md)
+> for the developer setup, test suite, and architecture notes. This README is
+> written for people *using* the tool.
+
 ## Quick Start
 
 ### 1. Install
@@ -44,10 +48,10 @@ Check with `python --version`.
 
 ```bash
 # Clone the repo
-git clone <repo-url> && cd jiramator
+git clone https://github.com/dkim_mktx/jiramator.git && cd jiramator
 
-# Install (editable) with dev deps
-pip install -e ".[dev]"
+# Install
+pip install -e .
 ```
 
 This adds a `jiramator` command to your shell.
@@ -106,7 +110,7 @@ If `configs/org/` and `configs/teams/` each contain exactly one file, both
 jiramator plan --dry-run
 ```
 
-Or specify paths explicitly (useful with multiple teams/orgs, or CI):
+Or specify paths explicitly (useful with multiple teams/orgs):
 
 ```bash
 # Dry run — preview what would be created, no API calls
@@ -118,7 +122,6 @@ jiramator plan --org-config configs/org/mycompany.yaml \
 jiramator plan --org-config configs/org/mycompany.yaml \
                --team-config configs/teams/myteam.yaml
 ```
-
 
 The `plan` command walks you through an interactive flow:
 
@@ -371,24 +374,6 @@ the change is safe.
 > `update` writes a run report as well, but does not currently support
 > `--resume`; re-run it against the same spreadsheet (blank cells are no-ops, so
 > re-running is safe for rows that already succeeded).
-
-### Current scope vs future work
-
-Shipped today:
-- `plan`, `import`, and `update` commands
-- Run reports + `--resume` with config-drift protection (`plan`, `import`)
-- Template inheritance (org `default_fields` → team `defaults` → template `fields`)
-- Sprint assignment for `plan` (via `board_id` + `sprint_name_template`)
-- Pre-existing epic reuse (`existing_epics`) and release→sprint mapping
-- CSV encoding auto-detection with `--encoding` override
-
-Still future work:
-- YAML-based ad-hoc bulk creation CLI
-- An interactive `setup` wizard for first-time config generation
-- broader README examples and operational playbooks
-
-Planning/spec artifacts now live under `.planning/specs/`.
-See `.planning/specs/README.md` for the canonical index and document statuses.
 
 ---
 
@@ -672,35 +657,12 @@ You write simple values in your config; the builder handles the rest.
 7. **Validate:** Run with `--dry-run` to see the full ticket set before touching
    Jira.
 
-## Running Tests
+## Getting Help
 
-```bash
-pip install -e ".[dev]"
-python -m pytest -v
-```
-
-Run the full suite after changing config, import, coercion, or Jira client behavior.
-The exact test count will change over time; rely on pytest output rather than this README for a hard number.
-
-Continuous integration runs the same suite on every push and pull request across
-Linux, macOS, and Windows (Python 3.11–3.13) via
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml).
-
-## Future Enhancements
-
-- **`setup` subcommand** — Interactive wizard to generate org and team config
-  files step by step (a big win for non-technical first-time setup).
-- **Field-discovery helper** — A command to list/search your Jira instance's
-  custom field IDs so you don't have to hand-map them from the REST API.
-- **MCP server** — Drive `plan`/`import`/`update` from an AI assistant
-  (Copilot, Claude) in natural language, removing the CLI/YAML barrier. See the
-  design proposal in [`docs/mcp-server-proposal.md`](docs/mcp-server-proposal.md).
-- **Duplicate detection for `plan`** — Query Jira for existing tickets matching
-  summary + PI label before creating, and skip them automatically. (`import`
-  already skips exact-summary duplicates; `plan` does not.)
-- **`--yes` flag** — Skip confirmation prompts for scripted/CI usage.
-- **Sub-task support** — Allow `type: Sub-task` with a `parent` field linking to
-  a parent issue (not just epic linking).
+- Something not working as documented? Open a
+  [GitHub issue](https://github.com/dkim_mktx/jiramator/issues).
+- Want to add a feature or fix something yourself? See
+  [CONTRIBUTING.md](CONTRIBUTING.md) for the developer setup and test suite.
 
 ## License
 
