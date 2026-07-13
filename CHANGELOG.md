@@ -3,6 +3,31 @@
 All notable changes to Jiramator are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.1.1] — 2026-07-13
+
+### Fixed
+- **`import`/`update`: `description` field now sends valid Atlassian Document
+  Format (ADF).** Jira Cloud's REST API v3 rejects a plain string for
+  `description` with `"The field value is not valid Atlassian Document Format
+  (ADF) content."`. The bulk-create/update field coercion now converts
+  `description` the same way it already did for other rich-text custom
+  fields, so spreadsheet imports and updates with a Description column work
+  correctly.
+- **`plan`: fix versions referenced only via a ticket template (e.g.
+  `fixVersions: ["{pi_label}"]` on a recurring ticket) are now detected and
+  offered for creation.** Previously, only the release versions typed in at
+  the `--versions` prompt were checked against Jira and auto-created;
+  a fix version referenced solely inside a ticket template's fields (such as
+  a PI-umbrella version distinct from per-release versions) would cause a
+  confusing 400 error at ticket-creation time instead of the normal
+  create-with-confirmation flow.
+
+### Docs
+- README: added a **Glossary** and **Troubleshooting** section, worked
+  examples for `plan`, `import`, and `update` (using a shared `PI26.4`
+  scenario), and a clearer firm-level (org config) vs. team-level (team
+  config) comparison.
+
 ## [1.1.0] — 2026-07-10
 
 ### Added
@@ -53,6 +78,7 @@ Initial release.
 - CSV encoding auto-detection with `--encoding` override.
 - Preview-first safety model: `--dry-run` on every command.
 
+[1.1.1]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.1.1
 [1.1.0]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.1.0
 [1.0.1]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.0.1
 [1.0.0]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.0.0

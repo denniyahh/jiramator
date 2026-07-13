@@ -82,7 +82,16 @@ class TestBuildRowPayload:
             "fields": {
                 "project": {"key": "CA"},
                 "summary": "Risk - calc discrepancy",
-                "description": "Reconcile VaR mismatch",
+                "description": {
+                    "type": "doc",
+                    "version": 1,
+                    "content": [
+                        {
+                            "type": "paragraph",
+                            "content": [{"type": "text", "text": "Reconcile VaR mismatch"}],
+                        }
+                    ],
+                },
                 "priority": {"name": "High"},
                 "issuetype": {"name": "Risk"},
                 "customfield_10273": [{"value": "No"}],

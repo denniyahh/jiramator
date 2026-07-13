@@ -24,6 +24,7 @@ from jiramator.jira_client import JiraApiError, JiraClient
 from jiramator.planner import (
     PlanInputs,
     _check_and_create_fix_versions,
+    _collect_referenced_fix_versions,
     _create_epics,
     _create_tickets_bulk,
     _display_preview,
@@ -247,6 +248,42 @@ class TestCheckAndCreateFixVersions:
                 mock_client, "TST", ["26.1.1"], console
             )
         mock_client.create_fix_version.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# _collect_referenced_fix_versions
+# ---------------------------------------------------------------------------
+
+
+class TestCollectReferencedFixVersions:
+    def test_collects_distinct_names_across_kinds(self):
+        """Names are pulled from every payload kind, deduped, order preserved."""
+        all_payloads = {
+            "epics": [{"fields": {"summary": "Epic"}}],
+            "per_release": [
+                {"fields": {"fixVersions": [{"name": "26.1.1"}]}},
+                {"fields": {"fixVersions": [{"name": "26.1.2"}]}},
+            ],
+            "per_sprint": [
+                {"fields": {"fixVersions": [{"name": "PI26"}]}},
+                {"fields": {"fixVersions": [{"name": "26.1.1"}]}},  # dup
+            ],
+        }
+        result = _collect_referenced_fix_versions(all_payloads)
+        assert result == ["26.1.1", "26.1.2", "PI26"]
+
+    def test_no_fix_versions_returns_empty(self):
+        """Payloads without any fixVersions field yield an empty list."""
+        all_payloads = {
+            "epics": [{"fields": {"summary": "Epic"}}],
+            "per_release": [{"fields": {"summary": "Task"}}],
+        }
+        assert _collect_referenced_fix_versions(all_payloads) == []
+
+    def test_ignores_empty_fix_versions_list(self):
+        """A payload with fixVersions: [] contributes nothing."""
+        all_payloads = {"per_sprint": [{"fields": {"fixVersions": []}}]}
+        assert _collect_referenced_fix_versions(all_payloads) == []
 
 
 # ---------------------------------------------------------------------------
@@ -530,6 +567,45 @@ class TestRunPlanFullFlow:
 
         with pytest.raises(SystemExit):
             run_plan(org_config, team_config, dry_run=False, console=console)
+
+    @patch("jiramator.planner.Confirm.ask")
+    @patch("jiramator.planner.Prompt.ask")
+    @patch("jiramator.planner.IntPrompt.ask")
+    @patch("jiramator.planner.JiraClient")
+    def test_template_only_fix_version_is_detected_and_created(
+        self,
+        mock_jira_cls,
+        mock_int_prompt,
+        mock_prompt,
+        mock_confirm,
+        org_config,
+        team_config,
+        console,
+    ):
+        """A per_sprint fixVersions like ["{pi_label}"] isn't in --versions,
+        but must still be surfaced and (with confirmation) created — it's
+        not a typo, it's a deliberate PI-umbrella version."""
+        team_config = team_config.model_copy(deep=True)
+        team_config.per_sprint_tickets[0].fields["fixVersions"] = ["{pi_label}"]
+
+        mock_prompt.side_effect = ["28", "26.1.1"]
+        mock_int_prompt.return_value = 1
+        mock_confirm.side_effect = [True, True]  # fix versions, duplicate warning
+
+        mock_client = MagicMock()
+        mock_jira_cls.return_value = mock_client
+        mock_client.get_fix_versions.return_value = []
+        mock_client.create_fix_version.return_value = {"name": "26.1.1", "id": "100"}
+        mock_client.create_issue.return_value = "TST-500"
+        mock_client.create_issues_bulk.return_value = ["TST-501", "TST-502"]
+
+        run_plan(org_config, team_config, dry_run=False, console=console)
+
+        # Both the typed-in release version AND the template-derived PI
+        # label version must be offered for creation.
+        mock_client.create_fix_version.assert_any_call("TST", "26.1.1")
+        mock_client.create_fix_version.assert_any_call("TST", "PI28")
+        assert mock_client.create_fix_version.call_count == 2
 
 
 # ---------------------------------------------------------------------------

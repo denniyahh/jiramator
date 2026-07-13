@@ -40,6 +40,21 @@ touches nothing in Jira until you confirm.
 > quick to scan. **Contributing to Jiramator itself?** See
 > [CONTRIBUTING.md](CONTRIBUTING.md) for the developer setup and test suite.
 
+## Glossary
+
+New to some of the terms below? Here's what they mean in Jiramator:
+
+| Term | What it means |
+|---|---|
+| **PI (Program Increment)** | A fixed planning window (often ~10 weeks / several sprints) that your teams plan work around. Jiramator generates a whole PI's worth of tickets at once. |
+| **Sprint** | A short, fixed work cycle (commonly 2 weeks) inside a PI. Jiramator can stamp out one or more tickets per sprint. |
+| **Epic** | A large bucket of work in Jira that smaller tickets are linked to (e.g. "BAU" or "Miscellaneous"). Jiramator can create these or reuse ones you already have. |
+| **Fix version / release** | The Jira label marking which release a ticket belongs to (e.g. `26.2.1`). Jiramator can generate a set of tickets per release. |
+| **Custom field ID** | Jira's internal code for a field you see by name (e.g. "Story Points" is really `customfield_10026`). The `init` wizard discovers these for you, so you never copy them by hand. |
+| **API token** | A password-like key that lets Jiramator sign in to Jira on your behalf. You create one on Atlassian's site; Jiramator reads it from your environment and never stores it in a file. |
+| **Dry run (`--dry-run`)** | A preview mode. Jiramator shows exactly what it *would* create or change and touches nothing in Jira until you confirm. |
+| **Org config / team config** | The two YAML settings files Jiramator uses. The *org config* holds Jira-instance settings shared across teams; the *team config* holds one team's ticket templates. The `init` wizard writes both for you. |
+
 ## Quick Start
 
 ### 1. Install
@@ -147,12 +162,21 @@ spreadsheet values will be coerced.
 
 ### Configure your org and team
 
-Jiramator splits configuration into two files:
+Jiramator splits configuration into two files, and it's worth being precise
+about the difference — mixing these up is the most common setup mistake:
 
-- **Org config** (`configs/org/`) — one per company: your Jira URL, custom
-  field IDs, sprint cadence. Shared across all teams.
-- **Team config** (`configs/teams/`) — one per team: your Jira project key,
-  team name, and the epic/ticket templates that get stamped out each PI.
+| | **Firm-level config** (`configs/org/`) | **Team-level config** (`configs/teams/`) |
+|---|---|---|
+| Think of it as | The rules of *your company's* Jira instance | *Your team's* recurring PI homework |
+| Shared or per-team? | **One file, shared by every team** at the company | **One file per team** |
+| Who usually sets it up | Whoever ran `jiramator init` first (often once, company-wide) | Each team, for itself |
+| What's inside | Jira URL, custom field ID mappings, spreadsheet column aliases, sprint cadence | Project key, team name, epics, and the ticket templates that get stamped out |
+| How often it changes | Rarely — only when a Jira admin adds/renames a field | Every PI, as templates evolve |
+
+In short: **firm-level = "how our Jira is wired up"; team-level = "what my
+team wants created."** If your company already has a firm-level config from
+another team's setup, you likely only need to create your own team-level
+config and point at the existing one.
 
 Both directories are gitignored, so once you copy real configs in, they stay
 local to your machine and are never committed.
@@ -167,14 +191,14 @@ Two org examples ship in `configs/org.example/`: `example.yaml` is a minimal
 starting point, and `marketaxess.yaml` is a fuller, production-shaped
 reference — use whichever is closer to your own setup.
 
-**Editing your org config** — at minimum, set:
+**Editing your org config (firm-level)** — at minimum, set:
 - `jira_url` — your Jira instance's base URL
 - `custom_fields` — map logical names to your instance's custom field IDs
   (find these via Jira admin, or `GET /rest/api/3/field`)
 - `sprints.count` / `sprints.standard_length_weeks` / `sprints.long_length_weeks`
   — your PI's sprint cadence
 
-**Editing your team config** — at minimum, set:
+**Editing your team config (team-level)** — at minimum, set:
 - `project_key` — your Jira project key (e.g. `CA`)
 - `team_name` — used in generated ticket summaries
 - `recurring_epics` / `per_release_tickets` / `per_sprint_tickets` — your
@@ -212,6 +236,66 @@ confirm before anything is created. See the
 **[Config Reference](https://github.com/dkim_mktx/jiramator/wiki/Config-Reference)**
 wiki page for how to define your team's epics and ticket templates.
 
+#### Example: planning PI26.4
+
+Say your team's next PI is **PI26.4**, shipping two releases (`26.4.1` and
+`26.4.2`), and your team-level config already reuses two existing epics
+(`bau`, `misc`) instead of creating new ones each time:
+
+```yaml
+# configs/teams/myteam.yaml (excerpt)
+project_key: PROJ
+team_name: MyTeam
+existing_epics:
+  bau: PROJ-1001
+  misc: PROJ-1002
+
+per_release_tickets:
+  - summary: "Testing - {version} Regression test"
+    sprint_group: "pre"
+    fields:
+      issuetype: Task
+      labels: ["{pi_label}", "Testing"]
+      fixVersions: ["{version}"]
+      customfield_10014: "$epic:misc"
+
+per_sprint_tickets:
+  - summary: "Misc - Prod Support (Sprint {sprint_num})"
+    fields:
+      issuetype: Task
+      labels: ["{pi_label}", "Prod_Support"]
+      customfield_10014: "$epic:misc"
+```
+
+Run a preview first — this creates nothing:
+
+```bash
+jiramator plan --dry-run
+```
+
+You'd be prompted for the PI number (`26.4`) and the two fix versions
+(`26.4.1`, `26.4.2`), then shown a preview table like:
+
+```
+Preview — PI26.4 (2 releases, 6 sprints)
+
+  #  Type   Summary                                    Fix Version / Sprint  Epic Link
+  1  Task   Testing - 26.4.1 Regression test            26.4.1                 PROJ-1002
+  2  Task   Testing - 26.4.2 Regression test             26.4.2                 PROJ-1002
+  3  Task   Misc - Prod Support (Sprint 1)               PI26.4                 PROJ-1002
+  4  Task   Misc - Prod Support (Sprint 2)               PI26.4                 PROJ-1002
+  ...        (5 more rows — sprints 3-6, with 6a/6b since Sprint 6 is a long sprint)
+
+  0 epics to create (2 existing epics reused: bau -> PROJ-1001, misc -> PROJ-1002)
+  9 tickets to create
+
+Create these in Jira? [y/N]
+```
+
+Nothing is written to Jira until you confirm — review the table, and if it
+looks right, re-run without `--dry-run` (or answer `y` at the prompt) to
+create everything for real.
+
 ### 2. Mass Ticket Creation (`import`)
 
 Creates Jira issues in bulk from a spreadsheet — e.g. risk intake, ad-hoc
@@ -231,6 +315,30 @@ config's `bulk_create.field_aliases` — the sample file's headers (`Summary`,
 `Issue Type`, `Priority`, `Labels`, `Fix Version`, `Reporter`, etc.) already
 match the shipped example org config.
 
+#### Example: importing a risk register after a security review
+
+Say your security review turned up three risks that need to become Jira
+tickets before PI26.4 closes out. Your spreadsheet (copied from the sample)
+looks like:
+
+| Summary | Priority | Labels | Fix Version | Risk Description | Overall Risk Value | Reporter |
+|---|---|---|---|---|---|---|
+| Vendor API rate limit may block checkout during peak load | High | PI26.4,Risk | 26.4.1 | Checkout requests may be throttled during traffic spikes. | 8 | jane.doe@example.com |
+| Data migration script has no rollback path | Medium | PI26.4,Migration | 26.4.1 | Partial failure could leave records inconsistent. | 5 | john.smith@example.com |
+| New reporting dashboard depends on unreleased library | Low | PI26.4,Dependency | 26.4.2 | Feature could slip if the library misses its release date. | 2 | jane.doe@example.com |
+
+Preview it first, then create for real:
+
+```bash
+jiramator import --dry-run ~/pi26.4-risks.xlsx   # preview — creates nothing
+jiramator import ~/pi26.4-risks.xlsx             # live — creates 3 Risk issues
+```
+
+The dry run shows each row resolved to a Jira issue type (`Risk`, per the
+org config's default) with its fields coerced to the right type (e.g.
+`Labels` split on commas, `Overall Risk Value` read as a number) — so you can
+catch a typo before anything is created.
+
 ### 3. Mass Ticket Updating (`update`)
 
 Bulk-edits fields on **existing** Jira issues from a spreadsheet. Requires a
@@ -249,6 +357,26 @@ jiramator update ~/my-updates.xlsx             # live — updates issues row by 
 > credentials and network access — it fetches field metadata from Jira to
 > preview coercion. It changes nothing, but it isn't credential-free.
 
+#### Example: bulk-updating tickets after a PI26.4 priority reshuffle
+
+Say a planning meeting just re-prioritized a handful of existing tickets and
+added one to the next fix version. Your spreadsheet (copied from the sample,
+with blank cells meaning "leave this field alone") looks like:
+
+| Key | Priority | Labels | Fix Version |
+|---|---|---|---|
+| PROJ-101 | High | *(blank)* | *(blank)* |
+| PROJ-102 | *(blank)* | PI26.4,Regression | *(blank)* |
+| PROJ-103 | Medium | *(blank)* | 26.4.2 |
+| PROJ-104 | *(blank)* | *(blank)* | *(blank)* |
+
+`PROJ-104` has no changes and is skipped automatically. Preview, then apply:
+
+```bash
+jiramator update --dry-run ~/pi26.4-updates.xlsx   # preview — changes nothing
+jiramator update ~/pi26.4-updates.xlsx             # live — updates 3 issues
+```
+
 📖 **For the full flag reference and safety model** for both `import` and
 `update` — column resolution order, value coercion rules, duplicate handling,
 dry-run limitations, and run reports/resuming — see the
@@ -263,6 +391,20 @@ browser using a bundled GitHub Actions form — but it requires GitHub Actions t
 be enabled on the repo, which is often disabled by enterprise policy. See
 **[Running via GitHub Actions](https://github.com/dkim_mktx/jiramator/wiki/Running-via-GitHub-Actions)**
 on the wiki for details and setup.
+
+## Troubleshooting
+
+Common first-run problems and how to fix them:
+
+| Symptom | Likely cause & fix |
+|---|---|
+| `jiramator: command not found` | The install didn't add `jiramator` to your PATH, or you're in a different terminal. With **pipx**, run `pipx ensurepath` then open a new terminal. With a **virtual environment**, re-run the `activate` line (see the install step) in each new terminal. |
+| `python3: command not found` (or `py` on Windows) | Python isn't installed or isn't on your PATH. Install Python 3.11+ from [python.org/downloads](https://www.python.org/downloads/) and reopen your terminal. |
+| **401 Unauthorized** / authentication errors | Your Jira email or API token is wrong, expired, or not set. Re-create a token at [id.atlassian.com/manage-profile/security/api-tokens](https://id.atlassian.com/manage-profile/security/api-tokens) and set `JIRA_EMAIL` / `JIRA_TOKEN` again. Note: `export`/`$env:` values only last for the **current terminal session**. |
+| **403 Forbidden** on create/update | Your account is authenticated but lacks permission to create or edit issues in that project. Ask your Jira admin for project access. |
+| **400 Bad Request** mentioning a field | A field value or custom field ID in your team config doesn't match your Jira instance. Re-run `jiramator init` to auto-discover field IDs, or check the value is one Jira accepts (e.g. a valid priority or issue type). |
+| `jiramator --version` shows an old version | Your installed copy is stale. Upgrade with `pipx upgrade jiramator` (pipx) or re-run `pip install -e .` inside your activated virtual environment. The setup wizard (`init`) requires v1.1.0 or newer. |
+| Not sure what a command will do | Add `--dry-run` (on `plan`/`import`) — it previews everything and creates nothing. |
 
 ## Getting Help
 

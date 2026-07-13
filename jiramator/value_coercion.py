@@ -13,6 +13,10 @@ _BUILTIN_FIELD_TYPES = {
     "fixVersions": "name_object_array",
     "components": "name_object_array",
     "labels": "labels",
+    # Jira Cloud's REST API v3 requires `description` as Atlassian Document
+    # Format (ADF), not a plain string — a bare string is rejected with
+    # "The field value is not valid Atlassian Document Format (ADF) content."
+    "description": "adf_text",
 }
 
 

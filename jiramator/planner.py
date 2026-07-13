@@ -238,6 +238,35 @@ def _resolve_sprints_exist_mode(
 # ---------------------------------------------------------------------------
 
 
+
+def _collect_referenced_fix_versions(
+    all_payloads: dict[str, list[dict[str, Any]]],
+) -> list[str]:
+    """Scan every built ticket payload for distinct ``fixVersions`` names.
+
+    Release versions typed in via ``--versions`` aren't the only fix
+    versions a config can reference — a template may also point at a
+    PI-umbrella version (e.g. ``fixVersions: ["{pi_label}"]``) so those
+    tickets show up in Jira's Release/Version reports. This walks the
+    already-built payloads (post template-resolution) so we check for
+    exactly what will be sent to Jira, regardless of where it came from.
+
+    Args:
+        all_payloads: Output of ``build_all()`` — dict of kind → payload list.
+
+    Returns:
+        Distinct fix version names, in first-seen order.
+    """
+    seen: dict[str, None] = {}
+    for payloads in all_payloads.values():
+        for payload in payloads:
+            for entry in payload.get("fields", {}).get("fixVersions", []) or []:
+                name = entry.get("name") if isinstance(entry, dict) else entry
+                if name:
+                    seen[name] = None
+    return list(seen)
+
+
 def _check_and_create_fix_versions(
     client: JiraClient,
     project_key: str,
@@ -720,7 +749,15 @@ def _run_plan_inner(
         sys.exit(1)
 
     # -- Step 8: Fix versions -----------------------------------------------
+    # Start from the release versions typed in / prompted for, then add any
+    # other fixVersions actually referenced in the built payloads (e.g. a
+    # PI-umbrella version like "PI26.4" set via fixVersions: ["{pi_label}"]
+    # on per_sprint_tickets). Either way, the user is prompted before
+    # anything is created — nothing is silently manufactured in Jira.
     needed_versions = list(dict.fromkeys(versions))  # deduplicate, preserve order
+    for name in _collect_referenced_fix_versions(all_payloads):
+        if name not in needed_versions:
+            needed_versions.append(name)
     console.print()
     _check_and_create_fix_versions(
         client, team_config.project_key, needed_versions, console,
