@@ -68,7 +68,7 @@ class ImportRunResult:
     failed: list[tuple[int, str, str]]
 
 
-_DIRECT_FIELDS = {"summary", "description"}
+_DIRECT_FIELDS = {"summary"}
 _DEFERRED_FIELDS = {"reporter"}
 
 
