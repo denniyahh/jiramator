@@ -56,6 +56,17 @@ def _adf_paragraph(text: str) -> dict[str, Any]:
     }
 
 
+def _resolve_value_alias(field_name: str, value: str, config: BulkCreateConfig) -> str:
+    """Translate a shorthand value to its exact Jira option label, if aliased.
+
+    Looks up ``config.value_aliases[field_name]``. Values with no matching
+    alias entry pass through unchanged — this is additive and never breaks
+    a field that already sends exact Jira option strings.
+    """
+    aliases = config.value_aliases.get(field_name, {})
+    return aliases.get(value, value)
+
+
 def coerce_field_value(field_name: str, raw_value: Any, config: BulkCreateConfig) -> Any:
     """Coerce a raw logical value into the Jira REST payload shape for a field."""
     field_type = config.field_types.get(field_name, _BUILTIN_FIELD_TYPES.get(field_name))
@@ -72,10 +83,12 @@ def coerce_field_value(field_name: str, raw_value: Any, config: BulkCreateConfig
 
     if field_type == "single_select":
         cleaned = str(raw_value).strip()
+        cleaned = _resolve_value_alias(field_name, cleaned, config)
         return {"value": cleaned}
 
     if field_type == "multi_select":
         values = split_multi_value(raw_value, config)
+        values = [_resolve_value_alias(field_name, item, config) for item in values]
         return [{"value": item} for item in values]
 
     if field_type == "adf_text":

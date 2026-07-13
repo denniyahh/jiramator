@@ -339,6 +339,25 @@ org config's default) with its fields coerced to the right type (e.g.
 `Labels` split on commas, `Overall Risk Value` read as a number) — so you can
 catch a typo before anything is created.
 
+> **Risk tickets and dropdown fields:** Several Risk-specific fields (Code
+> Complexity, QA Testing, Risk Impact, Risk Mitigation) are Jira dropdowns
+> whose option list includes a descriptive label, not just a number — e.g.
+> Jira expects `1. Low`, not `1`. If your source data scores these with a
+> bare number, Jira rejects it with `Select a valid option for <Field> and
+> try again.` Rather than editing every spreadsheet, add a
+> `bulk_create.value_aliases` map to your org config once:
+> ```yaml
+> bulk_create:
+>   value_aliases:
+>     code_complexity:
+>       "1": "1. Low"
+>       "2": "2. Medium"
+>       "3": "3. High"
+> ```
+> `import` and `update` both use this automatically — any value not listed
+> passes through unchanged. See `configs/org.example/example.yaml` for a
+> full example.
+
 ### 3. Mass Ticket Updating (`update`)
 
 Bulk-edits fields on **existing** Jira issues from a spreadsheet. Requires a
@@ -356,6 +375,12 @@ jiramator update ~/my-updates.xlsx             # live — updates issues row by 
 > Unlike `plan`/`import`, `update --dry-run` still requires valid Jira
 > credentials and network access — it fetches field metadata from Jira to
 > preview coercion. It changes nothing, but it isn't credential-free.
+>
+> The `bulk_create.value_aliases` shorthand-to-Jira-label mapping described
+> above (for Risk fields like Code Complexity/QA Testing/Risk Impact/Risk
+> Mitigation) applies here too — `import` and `update` share the same field
+> coercion, so no separate config is needed to update those dropdown fields
+> with shorthand values.
 
 #### Example: bulk-updating tickets after a PI26.4 priority reshuffle
 
