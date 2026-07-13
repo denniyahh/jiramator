@@ -76,6 +76,17 @@ class BulkCreateConfig(BaseModel):
         default_factory=dict,
         description="Maps logical or Jira field names to coercion types",
     )
+    value_aliases: dict[str, dict[str, str]] = Field(
+        default_factory=dict,
+        description=(
+            "Per-field value shorthand -> exact Jira option label, for "
+            "single_select/multi_select fields. Keyed by the same field "
+            "name used in field_types (logical name or Jira field name). "
+            "E.g. code_complexity: {'1': '1. Low', '2': '2. Medium'} lets "
+            "source data use '1' while Jira requires the full option "
+            "string '1. Low'. Unmapped values pass through unchanged."
+        ),
+    )
     defaults: dict[str, Any] = Field(
         default_factory=dict,
         description="Default field values applied by bulk-create workflows",

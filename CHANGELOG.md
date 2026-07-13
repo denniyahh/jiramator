@@ -3,6 +3,22 @@
 All notable changes to Jiramator are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] — 2026-07-13
+
+### Added
+- **`bulk_create.value_aliases` in org config** — maps shorthand spreadsheet
+  values to the exact Jira dropdown option label for `single_select`/
+  `multi_select` fields, in both `import` and `update` (they share the same
+  field-coercion path, so this works for both without extra config). Jira
+  rejects any value that isn't an exact match to a field's configured
+  option list; for **Risk** Jira tickets, fields like Code Complexity, QA
+  Testing, Risk Impact, and Risk Mitigation are commonly scored with a
+  bare number (e.g. `1`, `2`, `3`) in source data, while Jira's actual
+  option strings include a descriptive label (e.g. `1. Low`, `3. High`).
+  `value_aliases` lets you map the shorthand once in org config instead of
+  editing every spreadsheet. Values with no alias entry pass through
+  unchanged — fully additive, no impact on existing configs.
+
 ## [1.1.1] — 2026-07-13
 
 ### Fixed
@@ -78,6 +94,7 @@ Initial release.
 - CSV encoding auto-detection with `--encoding` override.
 - Preview-first safety model: `--dry-run` on every command.
 
+[1.2.0]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.2.0
 [1.1.1]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.1.1
 [1.1.0]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.1.0
 [1.0.1]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.0.1

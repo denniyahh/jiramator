@@ -54,6 +54,39 @@ class TestCoerceFieldValue:
 
         assert coerce_field_value("product_horizontals", "Calcs", bulk_create_config) == {"value": "Calcs"}
 
+    def test_single_select_resolves_value_alias(self):
+        from jiramator.value_coercion import coerce_field_value
+
+        config = BulkCreateConfig(
+            field_types={"code_complexity": "single_select"},
+            value_aliases={"code_complexity": {"1": "1. Low", "3": "3. High"}},
+        )
+        assert coerce_field_value("code_complexity", "1", config) == {"value": "1. Low"}
+        assert coerce_field_value("code_complexity", 3, config) == {"value": "3. High"}
+
+    def test_single_select_passes_through_unmapped_value(self):
+        from jiramator.value_coercion import coerce_field_value
+
+        config = BulkCreateConfig(
+            field_types={"code_complexity": "single_select"},
+            value_aliases={"code_complexity": {"1": "1. Low"}},
+        )
+        # No alias entry for "Medium" — unchanged, same as today's behavior.
+        assert coerce_field_value("code_complexity", "Medium", config) == {"value": "Medium"}
+
+    def test_multi_select_resolves_value_aliases_per_item(self):
+        from jiramator.value_coercion import coerce_field_value
+
+        config = BulkCreateConfig(
+            field_types={"platform": "multi_select"},
+            value_aliases={"platform": {"1": "Calcs", "2": "Risk"}},
+            multi_value_delimiter=",",
+        )
+        assert coerce_field_value("platform", "1,2", config) == [
+            {"value": "Calcs"},
+            {"value": "Risk"},
+        ]
+
     def test_multi_select_from_comma_separated_string(self, bulk_create_config: BulkCreateConfig):
         from jiramator.value_coercion import coerce_field_value
 

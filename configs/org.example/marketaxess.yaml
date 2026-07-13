@@ -93,6 +93,38 @@ bulk_create:
     database_impact: single_select
     requires_load_test: single_select
     production_sanity_test_with_release: single_select
+  # Optional: translate shorthand spreadsheet values to the exact Jira
+  # dropdown option string for single_select/multi_select fields. Jira
+  # rejects anything that isn't an exact match, so if your data uses "1"/
+  # "2"/"3" but the Jira option list is "1. Low"/"2. Medium"/"3. High",
+  # map it here instead of editing every spreadsheet. Unmapped values pass
+  # through unchanged. These map the actual MarketAxess CA project options
+  # (fetched via /rest/api/3/issue/createmeta/CA/issuetypes/{Risk-id}).
+  value_aliases:
+    code_complexity:
+      "0": "0. TBD"
+      "1": "1. Low"
+      "2": "2. Medium"
+      "3": "3. High"
+      "4": "4. Critical"
+    qa_testing:
+      "0": "0. TBD"
+      "1": "1. Low"
+      "2": "2. Medium"
+      "3": "3. High"
+      "4": "4. Critical"
+    risk_impact:
+      "0": "0. TBD"
+      "1": "1. Low Impact"
+      "2": "2. Medium Impact"
+      "3": "3. High Impact"
+      "4": "4. Critical Impact"
+    risk_mitigation_score:
+      "0": "0. TBD"
+      "1": "1. Easy to Mitigate"
+      "2": "2. Medium effort to mitigate"
+      "3": "3. Very difficult to mitigate"
+      "4": "4. Not possible to roll back without a release– need to fix and move forward"
   defaults:
     issuetype: Risk
   auto_lookup_unknown_fields: true
