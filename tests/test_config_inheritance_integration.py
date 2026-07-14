@@ -129,11 +129,11 @@ class TestConfigInheritanceIntegration:
         self, tmp_path: Path, capsys
     ) -> None:
         """II3: load real calcs.yaml; org provides priority Medium; conflicts warn."""
+        # Tracked fixture (not the gitignored configs/teams/ dir) so this
+        # test is reproducible on a fresh clone / in CI.
         calcs_path = (
-            Path(__file__).parent.parent / "configs" / "teams" / "calcs.yaml"
+            Path(__file__).parent / "fixtures" / "teams" / "calcs.yaml"
         )
-        if not calcs_path.exists():
-            pytest.skip("calcs.yaml fixture not present")
 
         org_data = dict(_BASE_ORG)
         # Use the real custom_fields shape that calcs.yaml references.
