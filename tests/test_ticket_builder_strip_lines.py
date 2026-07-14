@@ -173,8 +173,10 @@ def test_S4_build_all_on_real_calcs_config_emits_no_marker():
 
     repo_root = Path(__file__).resolve().parent.parent
     org_path = repo_root / "configs" / "org.example" / "example.yaml"
-    team_path = repo_root / "configs" / "teams" / "calcs.yaml"
-    if not org_path.exists() or not team_path.exists():
+    # Tracked fixture (not the gitignored configs/teams/ dir) so this test
+    # is reproducible on a fresh clone / in CI.
+    team_path = repo_root / "tests" / "fixtures" / "teams" / "calcs.yaml"
+    if not org_path.exists():
         pytest.skip("Shipped configs not present in this checkout")
 
     org_cfg, _ = load_org_config(org_path)

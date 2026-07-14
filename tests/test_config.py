@@ -27,7 +27,9 @@ from pydantic import ValidationError
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 CONFIGS_DIR = Path(__file__).parent.parent / "configs"
 ORG_CONFIG_PATH = CONFIGS_DIR / "org.example" / "example.yaml"
-TEAM_CONFIG_PATH = CONFIGS_DIR / "teams" / "calcs.yaml"
+# Use the tracked fixture (not the gitignored configs/teams/ dir) so this
+# suite is reproducible on a fresh clone / in CI.
+TEAM_CONFIG_PATH = FIXTURES_DIR / "teams" / "calcs.yaml"
 
 
 @pytest.fixture

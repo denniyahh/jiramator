@@ -12,7 +12,9 @@ from jiramator.spreadsheet import read_spreadsheet
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _ORG_CONFIG_PATH = _REPO_ROOT / "configs" / "org.example" / "example.yaml"
-_TEAM_CONFIG_PATH = _REPO_ROOT / "configs" / "teams" / "calcs.yaml"
+# Use the tracked fixture (not the gitignored configs/teams/ dir) so this
+# suite is reproducible on a fresh clone / in CI.
+_TEAM_CONFIG_PATH = _REPO_ROOT / "tests" / "fixtures" / "teams" / "calcs.yaml"
 
 
 def _write_ca_risk_workbook(path: Path) -> None:
