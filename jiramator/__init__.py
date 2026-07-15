@@ -1,3 +1,3 @@
 """Jiramator — Generic, config-driven Jira ticket automation."""
 
-__version__ = "1.2.0"
+__version__ = "1.2.1"
