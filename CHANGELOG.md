@@ -3,6 +3,18 @@
 All notable changes to Jiramator are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.2] — 2026-07-15
+
+### Fixed
+- **`import`/`update`: whole-number values from XLSX cells no longer break
+  `value_aliases` (or any other exact-string field match).** Excel/openpyxl
+  frequently stores whole numbers as floats internally (e.g. a cell showing
+  `1` is read back as `1.0`), even when the user never typed a decimal.
+  Spreadsheet ingestion now renders whole-number floats without the trailing
+  `.0`, so a `value_aliases` entry keyed `"1"` correctly matches a `1.0` cell
+  instead of silently passing through unmapped as `"1.0"` and getting
+  rejected by Jira with `Select a valid option ... and try again`.
+
 ## [1.2.1] — 2026-07-14
 
 ### Added
@@ -110,6 +122,7 @@ Initial release.
 - CSV encoding auto-detection with `--encoding` override.
 - Preview-first safety model: `--dry-run` on every command.
 
+[1.2.2]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.2.2
 [1.2.1]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.2.1
 [1.2.0]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.2.0
 [1.1.1]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.1.1

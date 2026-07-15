@@ -88,6 +88,30 @@ class TestReadSpreadsheet:
 
         assert rows == [{"Summary": "Risk A", "Priority": ""}]
 
+    def test_whole_number_float_cells_render_without_decimal(self, tmp_path: Path):
+        """Excel/openpyxl often stores whole numbers as floats internally
+        (e.g. a cell showing "1" reads back as 1.0). Left unhandled, this
+        breaks exact-match downstream lookups like `value_aliases`, which
+        expect "1" not "1.0"."""
+        import openpyxl
+
+        from jiramator.spreadsheet import read_spreadsheet
+
+        path = tmp_path / "sample.xlsx"
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(["Summary", "Code Complexity"])
+        ws.append(["Risk A", 1.0])
+        ws.append(["Risk B", 2.5])
+        wb.save(path)
+
+        rows = read_spreadsheet(path)
+
+        assert rows == [
+            {"Summary": "Risk A", "Code Complexity": "1"},
+            {"Summary": "Risk B", "Code Complexity": "2.5"},
+        ]
+
     def test_max_rows_limits_output(self, tmp_path: Path):
         from jiramator.spreadsheet import read_spreadsheet
 
