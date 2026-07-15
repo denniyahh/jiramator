@@ -3,6 +3,22 @@
 All notable changes to Jiramator are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.1] — 2026-07-14
+
+### Added
+- **`JIRAMATOR_CA_BUNDLE` and `JIRAMATOR_RELAX_TLS_STRICT` environment
+  variables** to work around SSL certificate errors on corporate networks
+  where a VPN client or TLS-inspecting proxy (e.g. Netskope, Zscaler)
+  re-signs HTTPS traffic with its own certificate. `JIRAMATOR_CA_BUNDLE`
+  points jiramator at an alternate trusted-certificate bundle (e.g. the
+  system store). `JIRAMATOR_RELAX_TLS_STRICT` narrowly relaxes a single
+  RFC 5280 conformance check (non-critical "Basic Constraints") that
+  Python 3.13+ enforces by default but some corporate proxy certificates
+  don't satisfy — certificate trust, hostname matching, and expiry checks
+  remain fully enforced either way. Both are opt-in and off by default, so
+  default behavior is unchanged. See the new README Troubleshooting entry
+  for guidance on when and how to use them.
+
 ## [1.2.0] — 2026-07-13
 
 ### Added
@@ -94,6 +110,7 @@ Initial release.
 - CSV encoding auto-detection with `--encoding` override.
 - Preview-first safety model: `--dry-run` on every command.
 
+[1.2.1]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.2.1
 [1.2.0]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.2.0
 [1.1.1]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.1.1
 [1.1.0]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.1.0

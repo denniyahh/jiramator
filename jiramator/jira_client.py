@@ -12,6 +12,8 @@ from the Jira response body.
 from __future__ import annotations
 
 import logging
+import os
+import ssl
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -65,6 +67,67 @@ _RETRY_STRATEGY = Retry(
 _DEFAULT_TIMEOUT = 30  # seconds
 _BULK_BATCH_SIZE = 50
 
+# Opt-in env vars for corporate TLS-inspecting proxies (Netskope, Zscaler, etc.).
+# See README Troubleshooting section for when/why these are needed.
+_CA_BUNDLE_ENV_VAR = "JIRAMATOR_CA_BUNDLE"
+_RELAX_TLS_STRICT_ENV_VAR = "JIRAMATOR_RELAX_TLS_STRICT"
+
+
+def _truthy(value: str | None) -> bool:
+    """Return whether an env var string should be treated as "on"."""
+    return (value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+class _CustomSslContextAdapter(HTTPAdapter):
+    """HTTPAdapter that mounts a caller-supplied ``ssl.SSLContext``.
+
+    ``requests.adapters.HTTPAdapter`` doesn't accept an ``ssl_context`` kwarg
+    directly — it must be injected via ``init_poolmanager``'s ``pool_kwargs``.
+    """
+
+    def __init__(self, *args: Any, ssl_context: ssl.SSLContext, **kwargs: Any) -> None:
+        self._ssl_context = ssl_context
+        super().__init__(*args, **kwargs)
+
+    def init_poolmanager(self, *args: Any, **kwargs: Any) -> None:
+        kwargs["ssl_context"] = self._ssl_context
+        return super().init_poolmanager(*args, **kwargs)
+
+
+def _build_https_adapter() -> HTTPAdapter:
+    """Build the HTTPS adapter, honoring optional TLS compatibility env vars.
+
+    By default, behaves exactly like a plain ``HTTPAdapter`` (verifies
+    certificates against certifi's bundle with Python's normal strict
+    checks). Two env vars allow narrowly-scoped relaxation for environments
+    behind a corporate TLS-inspecting proxy whose intercepting CA certificate
+    doesn't strictly conform to RFC 5280 (a real issue seen with some
+    Netskope/Zscaler deployments combined with Python 3.13+, which enables
+    ``ssl.VERIFY_X509_STRICT`` by default):
+
+    - ``JIRAMATOR_CA_BUNDLE``: path to a CA bundle to trust instead of
+      certifi's (e.g. the system trust store, which often already includes
+      a company's proxy CA).
+    - ``JIRAMATOR_RELAX_TLS_STRICT``: when truthy, clears
+      ``ssl.VERIFY_X509_STRICT`` so certificates with non-critical
+      "Basic Constraints" extensions aren't rejected. Certificate trust,
+      hostname verification, and expiry checks remain fully enforced —
+      this only relaxes one RFC-conformance nitpick.
+
+    Returns:
+        A configured ``HTTPAdapter`` with the retry strategy mounted.
+    """
+    ca_bundle = os.environ.get(_CA_BUNDLE_ENV_VAR)
+    relax_strict = _truthy(os.environ.get(_RELAX_TLS_STRICT_ENV_VAR))
+
+    if not ca_bundle and not relax_strict:
+        return HTTPAdapter(max_retries=_RETRY_STRATEGY)
+
+    ssl_context = ssl.create_default_context(cafile=ca_bundle) if ca_bundle else ssl.create_default_context()
+    if relax_strict:
+        ssl_context.verify_flags &= ~ssl.VERIFY_X509_STRICT
+    return _CustomSslContextAdapter(max_retries=_RETRY_STRATEGY, ssl_context=ssl_context)
+
 
 @dataclass
 class JiraClient:
@@ -92,10 +155,10 @@ class JiraClient:
             "Accept": "application/json",
         })
 
-        # Mount retry adapter for both http and https
-        adapter = HTTPAdapter(max_retries=_RETRY_STRATEGY)
-        self._session.mount("https://", adapter)
-        self._session.mount("http://", adapter)
+        # Mount retry adapter for both http and https. The https adapter may
+        # be TLS-compatibility-adjusted via env vars (see _build_https_adapter).
+        self._session.mount("https://", _build_https_adapter())
+        self._session.mount("http://", HTTPAdapter(max_retries=_RETRY_STRATEGY))
 
     # -- internal helpers --------------------------------------------------
 

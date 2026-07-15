@@ -430,6 +430,49 @@ Common first-run problems and how to fix them:
 | **400 Bad Request** mentioning a field | A field value or custom field ID in your team config doesn't match your Jira instance. Re-run `jiramator init` to auto-discover field IDs, or check the value is one Jira accepts (e.g. a valid priority or issue type). |
 | `jiramator --version` shows an old version | Your installed copy is stale. Upgrade with `pipx upgrade jiramator` (pipx) or re-run `pip install -e .` inside your activated virtual environment. The setup wizard (`init`) requires v1.1.0 or newer. |
 | Not sure what a command will do | Add `--dry-run` (on `plan`/`import`) — it previews everything and creates nothing. |
+| `SSLError` / `CERTIFICATE_VERIFY_FAILED` / "self-signed certificate in certificate chain" | Your company's network security tooling (VPN client, Netskope, Zscaler, etc.) is inspecting HTTPS traffic and presenting its own certificate. See [SSL certificate errors on a corporate network](#ssl-certificate-errors-on-a-corporate-network) below. |
+
+### SSL certificate errors on a corporate network
+
+If `jiramator` fails immediately on `plan`/`import`/`update` with an error like:
+
+```
+requests.exceptions.SSLError: ... SSLCertVerificationError: [SSL: CERTIFICATE_VERIFY_FAILED]
+certificate verify failed: self-signed certificate in certificate chain
+```
+
+this is almost always caused by network security software on your machine (a VPN client,
+Netskope, Zscaler, or similar) that inspects HTTPS traffic and re-signs it with its own
+internal certificate. This isn't a Jira or jiramator problem — it's your computer not yet
+trusting that internal certificate the way your browser or `curl` already does. A tell-tale
+sign: `curl https://<your-domain>.atlassian.net` works fine, but `jiramator` fails, because
+`curl` and Python each keep track of trusted certificates separately.
+
+Try these in order:
+
+1. **Ask IT/security which certificate bundle to trust.** Most companies with this kind of
+   network tooling already have documentation on how to configure Python/`pip` tools to
+   trust it — this is usually the real fix and helps everyone at the company, not just you.
+2. **Point jiramator at your system's certificate store** by setting the `JIRAMATOR_CA_BUNDLE`
+   environment variable to your system's trusted-certificate file, which often already
+   includes your company's proxy certificate (Linux/macOS example):
+   ```bash
+   export JIRAMATOR_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+   ```
+3. **If step 2 still fails** with an error mentioning `Basic Constraints of CA cert not marked
+   critical`, your company's inspection certificate is technically non-standard in a way that
+   newer Python versions reject by default (even though older tools like `curl` don't). As a
+   last resort, you can additionally set:
+   ```bash
+   export JIRAMATOR_RELAX_TLS_STRICT=1
+   ```
+   This only relaxes that one specific check — jiramator still verifies the certificate is
+   trusted, matches the Jira domain, and hasn't expired. It does **not** disable certificate
+   verification. Prefer flagging the malformed certificate to IT/security over leaving this
+   set long-term.
+
+Add both `export` lines to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.) so they persist
+across terminal sessions.
 
 ## Getting Help
 

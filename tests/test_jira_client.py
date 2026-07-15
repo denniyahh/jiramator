@@ -95,6 +95,60 @@ class TestClientInit:
 
 
 # ---------------------------------------------------------------------------
+# TLS compatibility env vars (corporate TLS-inspecting proxies)
+# ---------------------------------------------------------------------------
+
+
+class TestBuildHttpsAdapter:
+    """Test the opt-in TLS compatibility env vars used by _build_https_adapter."""
+
+    def test_defaults_to_plain_adapter_when_unset(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from requests.adapters import HTTPAdapter
+
+        from jiramator.jira_client import _build_https_adapter
+
+        monkeypatch.delenv("JIRAMATOR_CA_BUNDLE", raising=False)
+        monkeypatch.delenv("JIRAMATOR_RELAX_TLS_STRICT", raising=False)
+        adapter = _build_https_adapter()
+        assert type(adapter) is HTTPAdapter
+
+    def test_relax_tls_strict_clears_verify_x509_strict_flag(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import ssl
+
+        from jiramator.jira_client import _build_https_adapter
+
+        monkeypatch.delenv("JIRAMATOR_CA_BUNDLE", raising=False)
+        monkeypatch.setenv("JIRAMATOR_RELAX_TLS_STRICT", "1")
+        adapter = _build_https_adapter()
+        assert not (adapter._ssl_context.verify_flags & ssl.VERIFY_X509_STRICT)
+
+    def test_ca_bundle_env_var_loads_custom_bundle(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        # Use the system CA bundle as a stand-in for a custom one — just
+        # verifying the path is actually threaded into the SSLContext.
+        monkeypatch.delenv("JIRAMATOR_RELAX_TLS_STRICT", raising=False)
+        monkeypatch.setenv("JIRAMATOR_CA_BUNDLE", "/etc/ssl/certs/ca-certificates.crt")
+
+        from jiramator.jira_client import _build_https_adapter
+
+        adapter = _build_https_adapter()
+        assert adapter._ssl_context is not None
+
+    def test_truthy_accepts_common_true_spellings(self) -> None:
+        from jiramator.jira_client import _truthy
+
+        for value in ("1", "true", "True", "yes", "on"):
+            assert _truthy(value) is True
+        for value in (None, "", "0", "false", "no", "off"):
+            assert _truthy(value) is False
+
+
+# ---------------------------------------------------------------------------
 # get_project
 # ---------------------------------------------------------------------------
 
