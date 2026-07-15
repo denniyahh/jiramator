@@ -17,6 +17,13 @@ def _normalize_headers(headers: list[object]) -> list[str]:
 def _coerce_cell(value: object) -> str:
     if value is None:
         return ""
+    # Excel/openpyxl often stores whole numbers as floats internally (e.g. a
+    # cell displaying "1" may be read back as 1.0), even when the user never
+    # typed a decimal. Left as-is, this breaks exact-match lookups downstream
+    # (e.g. `value_aliases`, which expects "1" not "1.0") and looks wrong in
+    # any plain-text field. Render whole-number floats without the ".0".
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
     return str(value)
 
 
