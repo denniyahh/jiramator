@@ -522,6 +522,97 @@ class TestBuildPerReleaseTickets:
         )
         assert tickets == []
 
+    def test_sprint_num_resolved_by_position_not_version(
+        self, org_config, base_vars, epic_keys,
+    ):
+        """release_sprint_schedule is keyed by release *count*, and applied
+        to versions by position — not by the literal version string. This
+        lets the same schedule be reused every PI regardless of the actual
+        version numbers.
+        """
+        tc = TeamConfig(
+            project_key="X",
+            team_name="T",
+            release_sprint_schedule={
+                3: [
+                    {"pre": 2, "post": 3},
+                    {"pre": 4, "post": 5},
+                    {"pre": 5, "post": 6},
+                ],
+            },
+            per_release_tickets=[
+                TicketTemplate(
+                    summary="Pre - {version}", sprint_group="pre",
+                ),
+                TicketTemplate(
+                    summary="Post - {version}", sprint_group="post",
+                ),
+            ],
+        )
+        tickets = build_per_release_tickets(
+            org_config, tc, base_vars, ["99.9.9", "1.2.3", "4.5.6"], epic_keys,
+        )
+        # 2 templates x 3 versions, ordered template-major within each version
+        assert [t["_sprint_num"] for t in tickets] == [
+            "2", "3",  # version[0] "99.9.9" -> position 0 -> {pre:2, post:3}
+            "4", "5",  # version[1] "1.2.3" -> position 1 -> {pre:4, post:5}
+            "5", "6",  # version[2] "4.5.6" -> position 2 -> {pre:5, post:6}
+        ]
+
+    def test_different_release_count_uses_different_schedule(
+        self, org_config, base_vars, epic_keys,
+    ):
+        tc = TeamConfig(
+            project_key="X",
+            team_name="T",
+            release_sprint_schedule={
+                2: [{"pre": 4, "post": 5}, {"pre": 5, "post": 6}],
+                3: [{"pre": 2, "post": 3}, {"pre": 4, "post": 5}, {"pre": 5, "post": 6}],
+            },
+            per_release_tickets=[
+                TicketTemplate(summary="Pre - {version}", sprint_group="pre"),
+            ],
+        )
+        tickets = build_per_release_tickets(
+            org_config, tc, base_vars, ["1.0.0", "2.0.0"], epic_keys,
+        )
+        assert [t["_sprint_num"] for t in tickets] == ["4", "5"]
+
+    def test_missing_schedule_for_release_count_raises(
+        self, org_config, base_vars, epic_keys,
+    ):
+        """A template with sprint_group set, but no schedule entry matching
+        the actual release count, is a config error — not a silent no-op.
+        """
+        tc = TeamConfig(
+            project_key="X",
+            team_name="T",
+            release_sprint_schedule={2: [{"pre": 4, "post": 5}, {"pre": 5, "post": 6}]},
+            per_release_tickets=[
+                TicketTemplate(summary="Pre - {version}", sprint_group="pre"),
+            ],
+        )
+        with pytest.raises(ValueError, match="no release_sprint_schedule entry for 3"):
+            build_per_release_tickets(
+                org_config, tc, base_vars, ["1.0.0", "2.0.0", "3.0.0"], epic_keys,
+            )
+
+    def test_no_sprint_group_skips_schedule_lookup(
+        self, org_config, base_vars, epic_keys,
+    ):
+        """Templates without sprint_group never need a schedule, regardless
+        of release count — no error, no _sprint_num key.
+        """
+        tc = TeamConfig(
+            project_key="X",
+            team_name="T",
+            per_release_tickets=[TicketTemplate(summary="Pre - {version}")],
+        )
+        tickets = build_per_release_tickets(
+            org_config, tc, base_vars, ["1.0.0", "2.0.0", "3.0.0"], epic_keys,
+        )
+        assert all("_sprint_num" not in t for t in tickets)
+
 
 # ---------------------------------------------------------------------------
 # build_per_sprint_tickets

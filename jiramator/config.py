@@ -461,7 +461,7 @@ class TicketTemplate(BaseModel):
     sprint_group: str | None = Field(
         default=None,
         description="Sprint group for release-sprint mapping (e.g. 'pre', 'post'). "
-                    "Used with release_sprint_map to assign per-release tickets to sprints.",
+                    "Used with release_sprint_schedule to assign per-release tickets to sprints.",
     )
 
     @field_validator("summary")
@@ -546,11 +546,45 @@ class TeamConfig(BaseModel):
         raise ValueError(
             f"sprints_exist must be a boolean or null, got {type(v).__name__}: {v!r}"
         )
-    release_sprint_map: dict[str, dict[str, int]] = Field(
+    release_sprint_schedule: dict[int, list[dict[str, int]]] = Field(
         default_factory=dict,
-        description="Maps version → {sprint_group: sprint_number} for per-release sprint assignment. "
-                    "e.g. {'26.2.1': {'pre': 2, 'post': 3}}",
+        description=(
+            "Maps release count (the number of versions passed to a `plan` "
+            "run) to an ordered list of {sprint_group: sprint_number}, one "
+            "entry per release position, applied to `versions` by index. "
+            "E.g. {2: [{'pre': 4, 'post': 5}, {'pre': 5, 'post': 6}]} for "
+            "PIs with 2 releases, {3: [{'pre': 2, 'post': 3}, "
+            "{'pre': 4, 'post': 5}, {'pre': 5, 'post': 6}]} for 3 releases. "
+            "Write once per release-count pattern and reuse every PI — no "
+            "per-version editing required."
+        ),
     )
+
+    @field_validator("release_sprint_schedule")
+    @classmethod
+    def validate_release_sprint_schedule(
+        cls, v: dict[int, list[dict[str, int]]]
+    ) -> dict[int, list[dict[str, int]]]:
+        """Each schedule's entry count must match its own release-count key."""
+        for release_count, schedule in v.items():
+            if release_count < 1:
+                raise ValueError(
+                    f"release_sprint_schedule key {release_count} must be a "
+                    "positive integer (number of releases in a PI)."
+                )
+            if len(schedule) != release_count:
+                raise ValueError(
+                    f"release_sprint_schedule[{release_count}] has "
+                    f"{len(schedule)} position entries, expected "
+                    f"{release_count} (one per release position)."
+                )
+            for i, position in enumerate(schedule):
+                if not position:
+                    raise ValueError(
+                        f"release_sprint_schedule[{release_count}][{i}] "
+                        "must not be empty."
+                    )
+        return v
 
     defaults: TeamDefaults = Field(
         default_factory=TeamDefaults,

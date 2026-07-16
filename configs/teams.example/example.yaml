@@ -11,13 +11,16 @@ team_name: MyTeam
 board_id: 123
 sprint_name_template: "PI-{pi_num}.{sprint_num}-MyTeam"
 
-release_sprint_map:
-  "1.0.0":
-    pre: 1
-    post: 2
-  "1.1.0":
-    pre: 3
-    post: 4
+release_sprint_schedule:
+  # 2 releases per PI: release 1 -> pre=sprint 1, post=sprint 2; release 2 ->
+  # pre=sprint 3, post=sprint 4. Applied to `--versions` by position, so this
+  # same schedule is reused every PI once you know the release count — no
+  # per-version editing required.
+  2:
+    - pre: 1
+      post: 2
+    - pre: 3
+      post: 4
 
 existing_epics:
   bau: PROJ-1

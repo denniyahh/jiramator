@@ -253,7 +253,11 @@ def build_per_release_tickets(
         org_config: Organization config.
         team_config: Team config with per_release_tickets templates.
         variables: Base runtime variables (version will be overridden per iteration).
-        versions: List of release version strings (e.g. ["26.1.1", "26.1.2", "26.2.0"]).
+        versions: List of release version strings (e.g. ["26.1.1", "26.1.2", "26.2.0"]),
+            in release order — used both to interpolate `{version}` and, via
+            `len(versions)`, to select the matching `release_sprint_schedule`
+            entry (sprint numbers are then applied by position, not by the
+            literal version string).
         epic_keys: Mapping of epic ref keys to Jira issue keys.
 
     Returns:
@@ -261,7 +265,9 @@ def build_per_release_tickets(
     """
     tickets = []
     adf_custom_field_ids = _adf_custom_field_ids(org_config)
-    for version in versions:
+    release_count = len(versions)
+    schedule = team_config.release_sprint_schedule.get(release_count)
+    for position, version in enumerate(versions):
         version_vars = {**variables, "version": version}
         for template_idx, tmpl in enumerate(team_config.per_release_tickets):
             fields = _build_fields_payload(
@@ -272,10 +278,23 @@ def build_per_release_tickets(
                 epic_keys,
                 adf_custom_field_ids,
             )
-            # Resolve sprint number from release_sprint_map + sprint_group
+            # Resolve sprint number from release_sprint_schedule + sprint_group,
+            # applied to `versions` by position (not by literal version string) —
+            # so the same schedule is reused every PI once the release count is
+            # known, instead of hand-editing a version-keyed map each quarter.
             sprint_num = None
-            if tmpl.sprint_group and version in team_config.release_sprint_map:
-                sprint_num = team_config.release_sprint_map[version].get(tmpl.sprint_group)
+            if tmpl.sprint_group:
+                if schedule is None:
+                    raise ValueError(
+                        f"Team '{team_config.team_name}' has no "
+                        f"release_sprint_schedule entry for {release_count} "
+                        f"release(s) (versions: {', '.join(versions)}), but "
+                        f"per_release_tickets[{template_idx}] declares "
+                        f"sprint_group={tmpl.sprint_group!r}. Add a "
+                        f"release_sprint_schedule: {{{release_count}: [...]}} "
+                        "entry to the team config."
+                    )
+                sprint_num = schedule[position].get(tmpl.sprint_group)
             ticket: dict[str, Any] = {
                 "fields": fields,
                 "_template_key": f"per_release[{template_idx}]:{version}",

@@ -8,16 +8,14 @@ team_name: Calcs
 board_id: 362
 sprint_name_template: "PI-{pi_num}.{sprint_num}-Calc -TI83"
 
-release_sprint_map:
-  "26.2.1":
-    pre: 2
-    post: 3
-  "26.2.2":
-    pre: 4
-    post: 5
-  "26.3.0":
-    pre: 5
-    post: 6
+release_sprint_schedule:
+  3:
+    - pre: 2
+      post: 3
+    - pre: 4
+      post: 5
+    - pre: 5
+      post: 6
 
 existing_epics:
   bau: CA-4829

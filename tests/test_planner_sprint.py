@@ -313,7 +313,7 @@ class TestSprintsExistIntegration:
             board_id=362,  # board_id IS set — but sprints_exist=False must still skip
             sprints_exist=False,
             sprint_name_template="PI-{pi_num}.{sprint_num}",
-            release_sprint_map={},
+            release_sprint_schedule={},
             recurring_epics=[],
             per_release_tickets=[],
             per_sprint_tickets=[],
