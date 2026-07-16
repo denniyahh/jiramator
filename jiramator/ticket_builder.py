@@ -42,8 +42,37 @@ WRAPPED_FIELDS: dict[str, str] = {
 }
 # ``labels`` is already a string array in Jira — no wrapping needed.
 # ``project`` is injected by the builder as {"key": "..."}.
-# Custom fields (customfield_*), including textarea-type fields like
-# "Acceptance Criteria", pass through as plain strings.
+# Custom fields (customfield_*) pass through as plain strings *unless* the
+# org config declares them ``adf_text`` in ``bulk_create.field_types`` (see
+# ``_adf_custom_field_ids()``) — Jira Cloud rejects plain strings for any
+# rich-text/textarea custom field (e.g. "Acceptance Criteria"), not just the
+# built-in ``description`` field.
+
+
+def _adf_custom_field_ids(org_config: OrgConfig) -> frozenset[str]:
+    """Determine which Jira custom field IDs require ADF-wrapped text.
+
+    Ticket templates key their ``fields:`` blocks by raw Jira field name
+    (e.g. ``customfield_10042``), but ``field_types`` in the org config is
+    keyed by logical field name (e.g. ``acceptance_criteria``) — the same
+    convention used for import/update coercion. This reverse-maps logical
+    names declared ``adf_text`` back to their Jira field IDs via
+    ``custom_fields`` so the same declaration works for ``plan`` too.
+
+    Args:
+        org_config: Organization config with ``custom_fields`` and
+            ``bulk_create.field_types`` mappings.
+
+    Returns:
+        Frozenset of Jira custom field IDs (e.g. ``{"customfield_10042"}``)
+        that must be rendered as ADF.
+    """
+    field_types = org_config.bulk_create.field_types
+    return frozenset(
+        jira_field_id
+        for logical_name, jira_field_id in org_config.custom_fields.items()
+        if field_types.get(logical_name) == "adf_text"
+    )
 
 
 def _strip_template_key(payloads: list[dict[str, Any]]) -> None:
@@ -57,17 +86,23 @@ def _strip_template_key(payloads: list[dict[str, Any]]) -> None:
         p.pop("_template_key", None)
 
 
-def _wrap_field(field_name: str, value: Any) -> Any:
+def _wrap_field(field_name: str, value: Any, adf_custom_field_ids: frozenset[str] = frozenset()) -> Any:
     """Apply Jira field-type wrapping to a resolved value.
 
     Args:
         field_name: The Jira field name (e.g. "issuetype", "fixVersions").
         value: The already-resolved value (template vars interpolated, etc.).
+        adf_custom_field_ids: Custom field IDs (e.g. "customfield_10042")
+            that the org config declares as ``adf_text`` — see
+            :func:`_adf_custom_field_ids`.
 
     Returns:
         The value wrapped in the appropriate Jira JSON structure.
     """
-    wrap_type = WRAPPED_FIELDS.get(field_name)
+    if field_name in adf_custom_field_ids:
+        wrap_type = "adf_text"
+    else:
+        wrap_type = WRAPPED_FIELDS.get(field_name)
     if wrap_type is None:
         return value
 
@@ -138,11 +173,16 @@ def _build_fields_payload(
     project_key: str,
     variables: dict[str, str],
     epic_keys: dict[str, str],
+    adf_custom_field_ids: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
     """Build a complete ``fields`` dict for a Jira issue creation payload.
 
     Resolves all template variables and epic refs, applies field-type wrapping,
     and injects ``project`` and ``summary``.
+
+    Args:
+        adf_custom_field_ids: Custom field IDs the org config declares
+            ``adf_text`` — see :func:`_adf_custom_field_ids`.
     """
     fields: dict[str, Any] = {
         "project": {"key": project_key},
@@ -156,7 +196,7 @@ def _build_fields_payload(
 
     for field_name, raw_value in template_fields.items():
         resolved = resolve_value(raw_value, variables, epic_keys)
-        fields[field_name] = _wrap_field(field_name, resolved)
+        fields[field_name] = _wrap_field(field_name, resolved, adf_custom_field_ids)
 
     return fields
 
@@ -179,6 +219,7 @@ def build_epics(
         to populate ``epic_keys`` after creation.
     """
     epics = []
+    adf_custom_field_ids = _adf_custom_field_ids(org_config)
     for epic_tmpl in team_config.recurring_epics:
         fields = _build_fields_payload(
             epic_tmpl.fields,
@@ -186,6 +227,7 @@ def build_epics(
             team_config.project_key,
             variables,
             {},
+            adf_custom_field_ids,
         )
         # Epics must always be created as Jira Epic issues, regardless of what
         # might be present in the template fields.
@@ -218,6 +260,7 @@ def build_per_release_tickets(
         List of {"fields": {...}, "_sprint_num": str|None} payloads, one per template × version.
     """
     tickets = []
+    adf_custom_field_ids = _adf_custom_field_ids(org_config)
     for version in versions:
         version_vars = {**variables, "version": version}
         for template_idx, tmpl in enumerate(team_config.per_release_tickets):
@@ -227,6 +270,7 @@ def build_per_release_tickets(
                 team_config.project_key,
                 version_vars,
                 epic_keys,
+                adf_custom_field_ids,
             )
             # Resolve sprint number from release_sprint_map + sprint_group
             sprint_num = None
@@ -248,6 +292,7 @@ def _build_sprint_ticket(
     variables: dict[str, str],
     epic_keys: dict[str, str],
     sprint_label: str,
+    adf_custom_field_ids: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
     """Build a single per-sprint ticket payload.
 
@@ -257,6 +302,8 @@ def _build_sprint_ticket(
         variables: Base runtime variables.
         epic_keys: Epic ref → Jira key mapping.
         sprint_label: The sprint_num value (e.g. "3", "6a", "6b").
+        adf_custom_field_ids: Custom field IDs the org config declares
+            ``adf_text`` — see :func:`_adf_custom_field_ids`.
 
     Returns:
         A {"fields": {...}} payload dict.
@@ -268,6 +315,7 @@ def _build_sprint_ticket(
         project_key,
         sprint_vars,
         epic_keys,
+        adf_custom_field_ids,
     )
     return {"fields": fields, "_sprint_num": sprint_label}
 
@@ -297,6 +345,7 @@ def build_per_sprint_tickets(
     tickets = []
     sprint_cfg = org_config.sprints
     long_sprint_set = set(sprint_cfg.long_sprints)
+    adf_custom_field_ids = _adf_custom_field_ids(org_config)
 
     for sprint_num in range(1, sprint_cfg.count + 1):
         is_long = sprint_num in long_sprint_set
@@ -310,6 +359,7 @@ def build_per_sprint_tickets(
                     ticket = _build_sprint_ticket(
                         tmpl, team_config.project_key,
                         variables, epic_keys, sprint_label,
+                        adf_custom_field_ids,
                     )
                     ticket["_template_key"] = f"per_sprint[{template_idx}]:{sprint_label}"
                     tickets.append(ticket)
@@ -319,6 +369,7 @@ def build_per_sprint_tickets(
                 ticket = _build_sprint_ticket(
                     tmpl, team_config.project_key,
                     variables, epic_keys, sprint_label,
+                    adf_custom_field_ids,
                 )
                 ticket["_template_key"] = f"per_sprint[{template_idx}]:{sprint_label}"
                 tickets.append(ticket)
