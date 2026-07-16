@@ -3,6 +3,16 @@
 All notable changes to Jiramator are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.3] — 2026-07-16
+
+### Fixed
+- **`plan`: `description` field now sends valid Atlassian Document Format
+  (ADF).** Jira Cloud's REST API v3 rejects a plain string for `description`
+  with `"The field value is not valid Atlassian Document Format (ADF)
+  content."`. `import`/`update` already handled this (v1.1.1); `plan`'s
+  ticket builder now wraps `description` the same way, so PI-planning
+  templates can include a `description` field on epics/tickets.
+
 ## [1.2.2] — 2026-07-15
 
 ### Fixed
