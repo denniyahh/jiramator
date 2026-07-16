@@ -3,6 +3,22 @@
 All notable changes to Jiramator are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.4] — 2026-07-17
+
+### Fixed
+- **`plan`: custom fields declared `adf_text` in the org config's
+  `field_types` now send valid Atlassian Document Format (ADF), not just the
+  built-in `description` field.** v1.2.3 fixed `description`, but `plan`'s
+  ticket builder still special-cased only that one field — any other
+  rich-text custom field (e.g. "Acceptance Criteria", `customfield_10042`)
+  templated into `plan`'s epics/tickets was sent as a plain string and
+  rejected by Jira Cloud with `"The field value is not valid Atlassian
+  Document Format (ADF) content."`. The builder now reuses the same
+  `field_types: adf_text` declarations already used by `import`/`update`
+  (reverse-mapped from logical name to Jira field ID via `custom_fields`),
+  so declaring a field `adf_text` once covers `plan`, `import`, and `update`
+  consistently.
+
 ## [1.2.3] — 2026-07-16
 
 ### Fixed
@@ -132,6 +148,8 @@ Initial release.
 - CSV encoding auto-detection with `--encoding` override.
 - Preview-first safety model: `--dry-run` on every command.
 
+[1.2.4]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.2.4
+[1.2.3]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.2.3
 [1.2.2]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.2.2
 [1.2.1]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.2.1
 [1.2.0]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.2.0

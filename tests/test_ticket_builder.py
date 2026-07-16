@@ -13,6 +13,7 @@ from jiramator.config import (
 )
 from jiramator.ticket_builder import (
     WRAPPED_FIELDS,
+    _adf_custom_field_ids,
     _build_fields_payload,
     _strip_template_key,
     _wrap_field,
@@ -179,6 +180,56 @@ class TestResolveValue:
 
 
 # ---------------------------------------------------------------------------
+# _adf_custom_field_ids
+# ---------------------------------------------------------------------------
+
+
+class TestAdfCustomFieldIds:
+    """Tests for reverse-mapping adf_text-declared custom fields to Jira IDs."""
+
+    def test_no_field_types_declared(self):
+        oc = OrgConfig(
+            jira_url="https://example.atlassian.net",
+            custom_fields={"story_points": "customfield_10026"},
+            sprints=SprintConfig(
+                count=6, standard_length_weeks=2, long_length_weeks=3, long_sprints=[6],
+            ),
+        )
+        assert _adf_custom_field_ids(oc) == frozenset()
+
+    def test_adf_text_field_resolved_to_jira_id(self):
+        oc = OrgConfig(
+            jira_url="https://example.atlassian.net",
+            custom_fields={
+                "acceptance_criteria": "customfield_10042",
+                "story_points": "customfield_10026",
+            },
+            bulk_create={
+                "field_types": {
+                    "acceptance_criteria": "adf_text",
+                    "story_points": "single_select",
+                }
+            },
+            sprints=SprintConfig(
+                count=6, standard_length_weeks=2, long_length_weeks=3, long_sprints=[6],
+            ),
+        )
+        assert _adf_custom_field_ids(oc) == frozenset({"customfield_10042"})
+
+    def test_field_types_referencing_unknown_logical_name_ignored(self):
+        """A field_types entry with no matching custom_fields entry is a no-op."""
+        oc = OrgConfig(
+            jira_url="https://example.atlassian.net",
+            custom_fields={},
+            bulk_create={"field_types": {"acceptance_criteria": "adf_text"}},
+            sprints=SprintConfig(
+                count=6, standard_length_weeks=2, long_length_weeks=3, long_sprints=[6],
+            ),
+        )
+        assert _adf_custom_field_ids(oc) == frozenset()
+
+
+# ---------------------------------------------------------------------------
 # _wrap_field
 # ---------------------------------------------------------------------------
 
@@ -216,6 +267,37 @@ class TestWrapField:
 
     def test_unknown_field_not_wrapped(self):
         assert _wrap_field("customfield_10042", "some text") == "some text"
+
+    def test_custom_field_wrapped_as_adf_when_declared(self):
+        """Custom fields declared ``adf_text`` in the org config are ADF-wrapped.
+
+        Regression test: Jira Cloud rejects plain strings for *any*
+        rich-text custom field (e.g. "Acceptance Criteria"), not just the
+        built-in ``description`` field. Templates key fields by raw Jira
+        field ID, so the caller passes the resolved set of IDs directly.
+        """
+        result = _wrap_field(
+            "customfield_10042", "Acceptance criteria text",
+            adf_custom_field_ids=frozenset({"customfield_10042"}),
+        )
+        assert result == {
+            "type": "doc",
+            "version": 1,
+            "content": [
+                {
+                    "type": "paragraph",
+                    "content": [{"type": "text", "text": "Acceptance criteria text"}],
+                }
+            ],
+        }
+
+    def test_custom_field_not_wrapped_when_not_declared(self):
+        """Only field IDs present in adf_custom_field_ids are ADF-wrapped."""
+        result = _wrap_field(
+            "customfield_10026", 0.5,
+            adf_custom_field_ids=frozenset({"customfield_10042"}),
+        )
+        assert result == 0.5
 
     def test_description_wrapped_as_adf(self):
         """Jira REST v3 requires `description` as Atlassian Document Format."""
@@ -340,6 +422,45 @@ class TestBuildEpics:
         tc = TeamConfig(project_key="X", team_name="TestTeam", recurring_epics=[])
         epics = build_epics(org_config, tc, base_vars)
         assert epics == []
+
+    def test_custom_field_declared_adf_text_is_wrapped(self, base_vars):
+        """End-to-end regression: org config ``field_types: adf_text`` for a
+        custom field (keyed by logical name, reverse-mapped via
+        ``custom_fields``) must ADF-wrap that field's value in the built
+        payload — mirrors the ``description`` handling but for arbitrary
+        rich-text custom fields like "Acceptance Criteria".
+        """
+        oc = OrgConfig(
+            jira_url="https://example.atlassian.net",
+            custom_fields={"acceptance_criteria": "customfield_10042"},
+            bulk_create={"field_types": {"acceptance_criteria": "adf_text"}},
+            sprints=SprintConfig(
+                count=6, standard_length_weeks=2, long_length_weeks=3, long_sprints=[6],
+            ),
+        )
+        tc = TeamConfig(
+            project_key="X",
+            team_name="TestTeam",
+            recurring_epics=[
+                EpicTemplate(
+                    key="misc",
+                    summary="{team_name} {pi_label} - Misc",
+                    fields={"customfield_10042": "Some acceptance criteria text"},
+                ),
+            ],
+        )
+        epics = build_epics(oc, tc, base_vars)
+        fields = epics[0]["payload"]["fields"]
+        assert fields["customfield_10042"] == {
+            "type": "doc",
+            "version": 1,
+            "content": [
+                {
+                    "type": "paragraph",
+                    "content": [{"type": "text", "text": "Some acceptance criteria text"}],
+                }
+            ],
+        }
 
 
 # ---------------------------------------------------------------------------
