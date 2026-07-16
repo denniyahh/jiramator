@@ -215,7 +215,21 @@ class TestWrapField:
         assert _wrap_field("customfield_10026", 0.5) == 0.5
 
     def test_unknown_field_not_wrapped(self):
-        assert _wrap_field("description", "some text") == "some text"
+        assert _wrap_field("customfield_10042", "some text") == "some text"
+
+    def test_description_wrapped_as_adf(self):
+        """Jira REST v3 requires `description` as Atlassian Document Format."""
+        result = _wrap_field("description", "Acceptance criteria text")
+        assert result == {
+            "type": "doc",
+            "version": 1,
+            "content": [
+                {
+                    "type": "paragraph",
+                    "content": [{"type": "text", "text": "Acceptance criteria text"}],
+                }
+            ],
+        }
 
 
 # ---------------------------------------------------------------------------

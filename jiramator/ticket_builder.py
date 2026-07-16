@@ -16,6 +16,7 @@ from __future__ import annotations
 from typing import Any
 
 from jiramator.config import OrgConfig, TeamConfig, TicketTemplate, _EPIC_REF_RE, _TEMPLATE_VAR_RE
+from jiramator.value_coercion import _adf_paragraph
 from jiramator.yaml_loader import strip_line_markers as _strip_line_markers
 
 # ---------------------------------------------------------------------------
@@ -34,10 +35,15 @@ WRAPPED_FIELDS: dict[str, str] = {
     "priority": "name_object",           # {"name": "Medium"}
     "fixVersions": "name_object_array",  # [{"name": "26.1.1"}, ...]
     "components": "name_object_array",   # [{"name": "Frontend"}, ...]
+    # Jira Cloud's REST API v3 requires `description` as Atlassian Document
+    # Format (ADF), not a plain string — mirrors value_coercion.py's handling
+    # for import/update.
+    "description": "adf_text",
 }
 # ``labels`` is already a string array in Jira — no wrapping needed.
 # ``project`` is injected by the builder as {"key": "..."}.
-# Custom fields (customfield_*) pass through as-is.
+# Custom fields (customfield_*), including textarea-type fields like
+# "Acceptance Criteria", pass through as plain strings.
 
 
 def _strip_template_key(payloads: list[dict[str, Any]]) -> None:
@@ -71,6 +77,8 @@ def _wrap_field(field_name: str, value: Any) -> Any:
         if isinstance(value, list):
             return [{"name": item} for item in value]
         return [{"name": value}]
+    elif wrap_type == "adf_text":
+        return _adf_paragraph(str(value).strip())
 
     return value  # pragma: no cover — unreachable with current WRAPPED_FIELDS
 
