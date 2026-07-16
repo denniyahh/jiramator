@@ -653,6 +653,59 @@ class TestTeamConfig:
 
 
 # ---------------------------------------------------------------------------
+# release_sprint_schedule config tests
+# ---------------------------------------------------------------------------
+
+
+class TestReleaseSprintSchedule:
+    """Tests for TeamConfig.release_sprint_schedule validation."""
+
+    def test_valid_schedule(self) -> None:
+        cfg = TeamConfig(
+            project_key="X",
+            team_name="Test",
+            release_sprint_schedule={
+                2: [{"pre": 4, "post": 5}, {"pre": 5, "post": 6}],
+                3: [{"pre": 2, "post": 3}, {"pre": 4, "post": 5}, {"pre": 5, "post": 6}],
+            },
+        )
+        assert cfg.release_sprint_schedule[2] == [
+            {"pre": 4, "post": 5}, {"pre": 5, "post": 6},
+        ]
+
+    def test_default_empty(self) -> None:
+        cfg = TeamConfig(project_key="X", team_name="Test")
+        assert cfg.release_sprint_schedule == {}
+
+    def test_entry_count_mismatch_raises(self) -> None:
+        """A `3` key must have exactly 3 position entries."""
+        with pytest.raises(ValueError, match="expected 3"):
+            TeamConfig(
+                project_key="X",
+                team_name="Test",
+                release_sprint_schedule={
+                    3: [{"pre": 2, "post": 3}, {"pre": 4, "post": 5}],
+                },
+            )
+
+    def test_zero_release_count_key_raises(self) -> None:
+        with pytest.raises(ValueError, match="positive integer"):
+            TeamConfig(
+                project_key="X",
+                team_name="Test",
+                release_sprint_schedule={0: []},
+            )
+
+    def test_empty_position_entry_raises(self) -> None:
+        with pytest.raises(ValueError, match="must not be empty"):
+            TeamConfig(
+                project_key="X",
+                team_name="Test",
+                release_sprint_schedule={1: [{}]},
+            )
+
+
+# ---------------------------------------------------------------------------
 # existing_epics config tests
 # ---------------------------------------------------------------------------
 

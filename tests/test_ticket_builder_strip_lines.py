@@ -186,7 +186,7 @@ def test_S4_build_all_on_real_calcs_config_emits_no_marker():
         team_config=team_cfg,
         pi_label="PI28",
         pi_num="28",
-        versions=["28.1"],
+        versions=["28.1", "28.2", "28.3"],
         epic_keys={},
     )
     # Walk every payload across all three buckets — must be marker-free.

@@ -250,6 +250,16 @@ existing_epics:
   bau: PROJ-1001
   misc: PROJ-1002
 
+# Sprint assignment for per_release_tickets: keyed by *release count*, not by
+# version string, so the same schedule is reused every PI once you know how
+# many releases it has (2 in this example) — no per-quarter editing.
+release_sprint_schedule:
+  2:
+    - pre: 4
+      post: 5
+    - pre: 5
+      post: 6
+
 per_release_tickets:
   - summary: "Testing - {version} Regression test"
     sprint_group: "pre"
