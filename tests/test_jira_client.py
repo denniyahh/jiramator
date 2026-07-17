@@ -501,6 +501,168 @@ class TestGetBoardSprints:
 
 
 # ---------------------------------------------------------------------------
+# Createmeta (live field validation)
+# ---------------------------------------------------------------------------
+#
+# Note: this endpoint's response shape does NOT include an `isLast` key
+# (unlike the Agile board/sprint endpoint above) — pagination must be driven
+# by total/startAt/page-length instead. Confirmed against live Jira Cloud.
+
+
+class TestGetCreatemetaIssueTypes:
+    def test_single_page(self, client: JiraClient) -> None:
+        data = {
+            "startAt": 0,
+            "maxResults": 50,
+            "total": 2,
+            "issueTypes": [
+                {"id": "10000", "name": "Epic"},
+                {"id": "10010", "name": "Task"},
+            ],
+        }
+        client._session.get = MagicMock(return_value=_mock_response(200, data))
+        result = client.get_createmeta_issue_types("CA")
+        assert len(result) == 2
+        assert result[1]["name"] == "Task"
+        assert client._session.get.call_count == 1
+
+    def test_pagination_without_is_last(self, client: JiraClient) -> None:
+        """No `isLast` key in the response — must paginate by total/startAt."""
+        page1 = _mock_response(200, {
+            "startAt": 0,
+            "maxResults": 50,
+            "total": 60,
+            "issueTypes": [{"id": str(i), "name": f"Type{i}"} for i in range(50)],
+        })
+        page2 = _mock_response(200, {
+            "startAt": 50,
+            "maxResults": 50,
+            "total": 60,
+            "issueTypes": [{"id": str(50 + i), "name": f"Type{50 + i}"} for i in range(10)],
+        })
+        client._session.get = MagicMock(side_effect=[page1, page2])
+
+        result = client.get_createmeta_issue_types("CA")
+        assert len(result) == 60
+        assert client._session.get.call_count == 2
+
+    def test_error_raises(self, client: JiraClient) -> None:
+        client._session.get = MagicMock(
+            return_value=_mock_response(404, {"errorMessages": ["Project not found"]})
+        )
+        with pytest.raises(JiraApiError, match="Not found"):
+            client.get_createmeta_issue_types("NOPE")
+
+
+class TestGetCreatemetaFields:
+    def test_single_page_uses_fields_key(self, client: JiraClient) -> None:
+        """The field list is under `fields`, not `values`."""
+        data = {
+            "startAt": 0,
+            "maxResults": 50,
+            "total": 2,
+            "fields": [
+                {"fieldId": "summary", "name": "Summary", "required": True},
+                {"fieldId": "priority", "name": "Priority", "required": False},
+            ],
+        }
+        client._session.get = MagicMock(return_value=_mock_response(200, data))
+        result = client.get_createmeta_fields("CA", "10010")
+        assert set(result.keys()) == {"summary", "priority"}
+        assert result["summary"]["required"] is True
+        assert client._session.get.call_count == 1
+
+    def test_pagination_without_is_last(self, client: JiraClient) -> None:
+        """No `isLast` key — 52 fields across two pages (matches live Jira Cloud shape)."""
+        page1 = _mock_response(200, {
+            "startAt": 0,
+            "maxResults": 50,
+            "total": 52,
+            "fields": [
+                {"fieldId": f"field_{i}", "name": f"Field {i}"} for i in range(50)
+            ],
+        })
+        page2 = _mock_response(200, {
+            "startAt": 50,
+            "maxResults": 50,
+            "total": 52,
+            "fields": [
+                {"fieldId": "field_50", "name": "Field 50"},
+                {"fieldId": "field_51", "name": "Field 51"},
+            ],
+        })
+        client._session.get = MagicMock(side_effect=[page1, page2])
+
+        result = client.get_createmeta_fields("CA", "10010")
+        assert len(result) == 52
+        assert "field_51" in result
+        assert client._session.get.call_count == 2
+
+    def test_entries_without_field_id_are_skipped(self, client: JiraClient) -> None:
+        data = {
+            "startAt": 0,
+            "maxResults": 50,
+            "total": 1,
+            "fields": [{"name": "No field id here"}],
+        }
+        client._session.get = MagicMock(return_value=_mock_response(200, data))
+        result = client.get_createmeta_fields("CA", "10010")
+        assert result == {}
+
+    def test_error_raises(self, client: JiraClient) -> None:
+        client._session.get = MagicMock(
+            return_value=_mock_response(403, {"errorMessages": ["Forbidden"]})
+        )
+        with pytest.raises(JiraApiError):
+            client.get_createmeta_fields("CA", "10010")
+
+
+class TestGetCreatemetaFieldsByTypeName:
+    def test_resolves_name_to_fields(self, client: JiraClient) -> None:
+        issue_types_resp = _mock_response(200, {
+            "startAt": 0, "maxResults": 50, "total": 2,
+            "issueTypes": [
+                {"id": "10000", "name": "Epic"},
+                {"id": "10010", "name": "Task"},
+            ],
+        })
+        fields_resp = _mock_response(200, {
+            "startAt": 0, "maxResults": 50, "total": 1,
+            "fields": [{"fieldId": "summary", "name": "Summary", "required": True}],
+        })
+        client._session.get = MagicMock(side_effect=[issue_types_resp, fields_resp])
+
+        result = client.get_createmeta_fields_by_type_name("CA", "Task")
+        assert "summary" in result
+        # Second call should target the Task issue type's id (10010).
+        second_call_url = client._session.get.call_args_list[1].args[0]
+        assert "10010" in second_call_url
+
+    def test_case_insensitive_match(self, client: JiraClient) -> None:
+        issue_types_resp = _mock_response(200, {
+            "startAt": 0, "maxResults": 50, "total": 1,
+            "issueTypes": [{"id": "10010", "name": "Task"}],
+        })
+        fields_resp = _mock_response(200, {
+            "startAt": 0, "maxResults": 50, "total": 0, "fields": [],
+        })
+        client._session.get = MagicMock(side_effect=[issue_types_resp, fields_resp])
+
+        result = client.get_createmeta_fields_by_type_name("CA", "task")
+        assert result == {}
+
+    def test_unknown_issue_type_raises(self, client: JiraClient) -> None:
+        issue_types_resp = _mock_response(200, {
+            "startAt": 0, "maxResults": 50, "total": 1,
+            "issueTypes": [{"id": "10010", "name": "Task"}],
+        })
+        client._session.get = MagicMock(return_value=issue_types_resp)
+
+        with pytest.raises(JiraApiError, match="not available for creation"):
+            client.get_createmeta_fields_by_type_name("CA", "Bug")
+
+
+# ---------------------------------------------------------------------------
 # Error handling edge cases
 # ---------------------------------------------------------------------------
 
