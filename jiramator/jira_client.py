@@ -485,6 +485,114 @@ class JiraClient:
         logger.info("Created fix version '%s' (id=%s)", name, data.get("id"))
         return data
 
+    def get_createmeta_issue_types(self, project_key: str) -> list[dict[str, Any]]:
+        """List issue types available for creation in a project.
+
+        Uses Jira's "create issue metadata" endpoint — the same schema Jira's
+        own create-issue screen is built from, which is why it's the best
+        available signal for client-side pre-flight validation (see
+        ``payload_validator.py``).
+
+        Returns:
+            List of dicts with at least ``id`` and ``name`` keys.
+        """
+        issue_types: list[dict[str, Any]] = []
+        start_at = 0
+        page_size = 50
+
+        while True:
+            response = self._session.get(
+                self._url(f"/rest/api/3/issue/createmeta/{project_key}/issuetypes"),
+                params={"startAt": start_at, "maxResults": page_size},
+                timeout=_DEFAULT_TIMEOUT,
+            )
+            if not response.ok:
+                self._handle_error(
+                    response,
+                    f"fetching create-issue metadata for project {project_key}",
+                )
+            data = response.json()
+            issue_types.extend(data.get("issueTypes", []))
+            if data.get("isLast", True):
+                break
+            start_at += page_size
+
+        return issue_types
+
+    def get_createmeta_fields(
+        self, project_key: str, issue_type_id: str
+    ) -> dict[str, dict[str, Any]]:
+        """Fetch field schema metadata for one issue type.
+
+        Args:
+            project_key: The Jira project key.
+            issue_type_id: The Jira issue type id (from
+                ``get_createmeta_issue_types()``), not its display name.
+
+        Returns:
+            Dict keyed by Jira field id (e.g. ``"customfield_10042"``), each
+            holding the field descriptor Jira returns — at minimum
+            ``required``, ``schema``, and (when applicable) ``allowedValues``.
+        """
+        fields: dict[str, dict[str, Any]] = {}
+        start_at = 0
+        page_size = 50
+
+        while True:
+            response = self._session.get(
+                self._url(
+                    f"/rest/api/3/issue/createmeta/{project_key}"
+                    f"/issuetypes/{issue_type_id}"
+                ),
+                params={"startAt": start_at, "maxResults": page_size},
+                timeout=_DEFAULT_TIMEOUT,
+            )
+            if not response.ok:
+                self._handle_error(
+                    response,
+                    f"fetching create-issue field metadata for issue type "
+                    f"{issue_type_id} in {project_key}",
+                )
+            data = response.json()
+            for entry in data.get("values", []):
+                field_id = entry.get("fieldId")
+                if field_id:
+                    fields[field_id] = entry
+            if data.get("isLast", True):
+                break
+            start_at += page_size
+
+        return fields
+
+    def get_createmeta_fields_by_type_name(
+        self, project_key: str, issue_type_name: str
+    ) -> dict[str, dict[str, Any]]:
+        """Resolve an issue type name (e.g. "Task", "Epic") to its field schema.
+
+        Convenience wrapper combining ``get_createmeta_issue_types()`` (to
+        resolve the name to Jira's internal id) and ``get_createmeta_fields()``.
+
+        Raises:
+            JiraApiError: If ``issue_type_name`` isn't available for creation
+                in this project (e.g. a misconfigured issue type scheme).
+        """
+        issue_types = self.get_createmeta_issue_types(project_key)
+        match = next(
+            (
+                it for it in issue_types
+                if str(it.get("name", "")).casefold() == issue_type_name.casefold()
+            ),
+            None,
+        )
+        if match is None:
+            available = ", ".join(sorted(str(it.get("name", "")) for it in issue_types))
+            raise JiraApiError(
+                f"Issue type '{issue_type_name}' is not available for "
+                f"creation in project {project_key} "
+                f"(available: {available or 'none'})."
+            )
+        return self.get_createmeta_fields(project_key, match["id"])
+
     def get_board_sprints(
         self,
         board_id: int,
