@@ -5,16 +5,24 @@ This is the brains of the ``plan`` command.  It handles:
     2. Fix version check-and-create
     3. Ticket payload generation via the builder
     4. Rich Table dry-run preview
-    5. Duplicate warning
-    6. Confirmation and creation (epics first, then bulk tickets)
-    7. Results display
+    5. Live field validation against Jira's createmeta schema
+    6. Duplicate warning
+    7. Confirmation and creation (epics first, then bulk tickets)
+    8. Results display
 
 The ``run_plan()`` function is the single entry point, called by ``cli.py``.
 It receives already-loaded configs and a ``Console`` for output.  The Jira
 client is constructed internally (credentials resolved from env vars at that
-point) so that ``--dry-run`` can skip credential resolution entirely.
-"""
+point).
 
+``--dry-run`` no longer guarantees zero network access: it opportunistically
+builds a client and validates every ticket's fields against Jira's live
+``createmeta`` schema (see ``payload_validator.py``), so obvious problems
+(missing required fields, wrong ADF/plain-text shape, invalid select values)
+surface before anything is ever created. If credentials are absent or Jira
+is unreachable, dry-run degrades gracefully — it warns and still completes
+the (unvalidated) preview rather than failing.
+"""
 from __future__ import annotations
 
 import sys
@@ -23,6 +31,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import requests
 from rich.console import Console
 from rich.prompt import Confirm, IntPrompt, Prompt
 from rich.table import Table
@@ -30,6 +39,7 @@ from rich.table import Table
 from jiramator.config import OrgConfig, TeamConfig
 from jiramator.error_format import ConfigValidationError
 from jiramator.jira_client import JiraApiError, JiraClient
+from jiramator.payload_validator import validate_ticket_payload
 from jiramator.run_report import (
     ConfigDriftError,
     IssueResult,
@@ -397,6 +407,101 @@ def _display_preview(
     return total
 
 
+def _payload_fields(item: dict[str, Any]) -> dict[str, Any]:
+    """Return the ``fields`` dict from a built payload, whatever its shape.
+
+    Epics are nested one level deeper (``{"payload": {"fields": {...}}}``)
+    than per_release/per_sprint tickets (``{"fields": {...}}``) — see
+    ``ticket_builder.build_epics()`` vs ``build_per_release_tickets()``.
+    """
+    if "fields" in item:
+        return item["fields"]
+    return item.get("payload", {}).get("fields", {})
+
+
+def _validate_payloads_against_jira(
+    client: JiraClient,
+    project_key: str,
+    all_payloads: dict[str, list[dict[str, Any]]],
+) -> list[str]:
+    """Validate every built ticket's fields against Jira's live createmeta schema.
+
+    Fetches each distinct issue type's field schema once (cached across
+    payloads) and checks every payload against it via
+    ``payload_validator.validate_ticket_payload()``.
+
+    Returns:
+        Human-readable problem descriptions, one per (ticket, field) issue
+        found. Empty list means everything looks valid.
+
+    Raises:
+        JiraApiError: If Jira itself can't be reached/queried for schema
+            (e.g. bad project key, permissions, network error via a wrapped
+            ``requests`` exception). Callers should treat this as
+            "validation unavailable" — see ``_preflight_validate``.
+    """
+    schema_cache: dict[str, dict[str, dict[str, Any]]] = {}
+    problems: list[str] = []
+
+    for kind in ("epics", "per_release", "per_sprint"):
+        for item in all_payloads.get(kind, []):
+            fields = _payload_fields(item)
+            issuetype_name = fields.get("issuetype", {}).get("name")
+            if not issuetype_name:
+                continue
+            if issuetype_name not in schema_cache:
+                schema_cache[issuetype_name] = client.get_createmeta_fields_by_type_name(
+                    project_key, issuetype_name
+                )
+            label = fields.get("summary") or item.get("_template_key") or "(untitled)"
+            for message in validate_ticket_payload(fields, schema_cache[issuetype_name]):
+                problems.append(f"[{issuetype_name}] {label}: {message}")
+
+    return problems
+
+
+def _preflight_validate(
+    client: JiraClient,
+    project_key: str,
+    all_payloads: dict[str, list[dict[str, Any]]],
+    console: Console,
+    *,
+    persist,
+) -> None:
+    """Best-effort field validation gate, shared by dry-run and live-run.
+
+    Prints results to console. Connectivity problems (Jira unreachable, API
+    error while fetching schema) are treated as "validation unavailable" —
+    a warning is printed and the caller proceeds as if nothing were checked.
+    Real field problems (missing required fields, ADF mismatches, invalid
+    select values) are a hard stop in both modes: they're printed and the
+    process exits(1) before anything is created.
+    """
+    console.print("\n[bold]Validating ticket fields against Jira...[/]")
+    try:
+        problems = _validate_payloads_against_jira(client, project_key, all_payloads)
+    except JiraApiError as exc:
+        console.print(f"  [yellow]⚠ Skipping field validation (Jira error): {exc}[/]")
+        return
+    except requests.exceptions.RequestException as exc:
+        console.print(f"  [yellow]⚠ Skipping field validation (connection error): {exc}[/]")
+        return
+
+    if not problems:
+        console.print("  [green]✓ All ticket fields look valid.[/]")
+        return
+
+    console.print(f"\n[red bold]✗ Found {len(problems)} field problem(s):[/]")
+    for problem in problems:
+        console.print(f"  [red]•[/] {problem}")
+    console.print(
+        "\n[red bold]Aborting[/] — fix the issues above before creating tickets. "
+        "No tickets were created."
+    )
+    persist()
+    sys.exit(1)
+
+
 # ---------------------------------------------------------------------------
 # Sprint resolution
 # ---------------------------------------------------------------------------
@@ -580,15 +685,18 @@ def run_plan(
         3. Initialize and persist a starter run report
         4. Build initial payloads (dry-run: epic refs unresolved)
         5. Display preview table
-        6. If --dry-run: persist success and exit
+        6. If --dry-run: best-effort field validation against Jira's
+           createmeta schema, then persist success and exit
         7. Resolve Jira credentials, build client
-        8. Check/create fix versions
-        9. Warn about duplicates, confirm
-        10. Create epics (skip those already created in prior_report)
-        11. Rebuild non-epic payloads with real epic keys
-        12. Bulk create tickets (skip those already created in prior_report)
-        13. Persist final report (status flipped to success/partial/failed)
-        14. Display results
+        8. Field validation against Jira's createmeta schema (hard stop on
+           real problems; connectivity issues degrade to a warning)
+        9. Check/create fix versions
+        10. Warn about duplicates, confirm
+        11. Create epics (skip those already created in prior_report)
+        12. Rebuild non-epic payloads with real epic keys
+        13. Bulk create tickets (skip those already created in prior_report)
+        14. Persist final report (status flipped to success/partial/failed)
+        15. Display results
 
     Args:
         report_path: If provided, the run report is written here after every
@@ -733,8 +841,28 @@ def _run_plan_inner(
 
     total = _display_preview(all_payloads, versions, org_config, console)
 
-    # -- Step 6: Dry-run exit -----------------------------------------------
+    # -- Step 5b: Validate fields against Jira's live createmeta schema -----
+    # For dry-run this is best-effort: if we can't reach Jira at all (no
+    # creds, network down), we warn and still complete the (offline) dry
+    # run rather than block it — see planner.py module docstring. If Jira
+    # *is* reachable, real field problems (missing required fields, ADF
+    # mismatches, invalid select values) are treated as a hard stop in both
+    # dry-run and live-run — that's the whole point of validating.
     if dry_run:
+        try:
+            validation_client = JiraClient(org_config)
+        except ValueError as exc:
+            console.print(
+                f"\n[yellow]⚠ Skipping field validation (no Jira credentials "
+                f"available): {exc}[/]"
+            )
+            validation_client = None
+        if validation_client is not None:
+            _preflight_validate(
+                validation_client, team_config.project_key, all_payloads,
+                console, persist=persist,
+            )
+
         console.print("\n[yellow]── Dry run ── no tickets created.[/]")
         report.status = "success"
         report.ended_at = datetime.now(timezone.utc).isoformat()
@@ -747,6 +875,10 @@ def _run_plan_inner(
     except ValueError as exc:
         console.print(f"\n[red bold]Credential error:[/] {exc}")
         sys.exit(1)
+
+    _preflight_validate(
+        client, team_config.project_key, all_payloads, console, persist=persist,
+    )
 
     # -- Step 8: Fix versions -----------------------------------------------
     # Start from the release versions typed in / prompted for, then add any
