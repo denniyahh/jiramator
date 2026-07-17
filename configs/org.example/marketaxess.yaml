@@ -18,6 +18,7 @@ custom_fields:
   sprint_field:         customfield_10021
   story_points:         customfield_10026
   epic_link:            customfield_10014
+  acceptance_criteria:  customfield_10042
   api_impact:           customfield_10273
   product_horizontals:  customfield_12747
   product_verticals:    customfield_12749
@@ -48,6 +49,12 @@ bulk_create:
     Labels: labels
     Fix Version: fixVersions
     Fix Versions: fixVersions
+    Acceptance Criteria: acceptance_criteria
+    Assignee: assignee
+    Parent: parent
+    Sprint: sprint_field
+    Product Horizontals (Finance): product_horizontals
+    Product Verticals (Finance): product_verticals
     API Impact: api_impact
     Product Horizontals: product_horizontals
     Product Verticals: product_verticals
@@ -86,6 +93,7 @@ bulk_create:
     risk_description: adf_text
     risk_mitigation_plan: adf_text
     plan_for_risk_mitigation: adf_text
+    acceptance_criteria: adf_text
     overall_risk_value: number
     tech_stack: adf_text
     repositories: adf_text

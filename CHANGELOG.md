@@ -3,6 +3,70 @@
 All notable changes to Jiramator are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.8] — 2026-07-17
+
+### Changed
+- **`configs/org.example/marketaxess.yaml` — added `field_aliases` entries
+  for `Acceptance Criteria`, `Assignee`, `Parent`, `Sprint`, `Product
+  Horizontals (Finance)`, and `Product Verticals (Finance)`.** These columns
+  previously had no explicit alias, so they only resolved via a live lookup
+  against Jira's field metadata (`auto_lookup_unknown_fields`) rather than
+  the org config — meaning `import`/`update` needed live Jira access to
+  resolve them at all (v1.2.7 made `import --dry-run` do this
+  opportunistically, but it's still a live dependency). Declaring them in
+  `field_aliases` explicitly resolves them from config alone, with no
+  network dependency either way.
+
+## [1.2.7] — 2026-07-17
+
+### Fixed
+- **`import --dry-run` no longer shows false "skipped unresolved column"
+  warnings for columns that only resolve via live Jira field metadata.**
+  Columns not explicitly listed in `bulk_create.field_aliases` — such as
+  `Assignee`, `Parent`, `Sprint`, or any custom field matched by its live
+  Jira display name (`auto_lookup_unknown_fields`) — previously only
+  resolved during a live run, since dry-run never called Jira at all.
+  `import --dry-run` now opportunistically fetches live field metadata
+  (`client.get_fields()`) for a preview that accurately reflects what a live
+  run will do, and degrades gracefully to the previous `field_aliases`-only
+  preview if credentials are missing or Jira is unreachable.
+
+## [1.2.6] — 2026-07-17
+
+### Added
+- **`plan`: live field validation against Jira's createmeta schema, in both
+  `--dry-run` and live runs.** Before any ticket is created, every built
+  payload is checked against the target issue type's actual field
+  requirements — catching missing required fields, plain-text values where
+  Jira expects Atlassian Document Format (ADF), and invalid select-field
+  values before Jira rejects them with a 400. `--dry-run` now opportunistically
+  builds a Jira client for this check; if credentials are missing or Jira is
+  unreachable, it degrades gracefully to an unvalidated preview instead of
+  failing (see the updated README "Set credentials" section).
+
+### Fixed
+- Fixed two bugs in the initial implementation of the validation above that
+  made it a silent no-op: `get_createmeta_fields()` read the wrong JSON key
+  (`values` instead of `fields`) so it always returned empty metadata, and
+  neither `get_createmeta_fields()` nor `get_createmeta_issue_types()`
+  paginated correctly (both endpoints omit the `isLast` key that other Jira
+  endpoints return, so pagination silently stopped after the first 50
+  results). Also fixed a false positive where `fixVersions` values were
+  checked against Jira's list of *already-existing* versions — but `plan`'s
+  entire purpose is to reference/create new ones, so every not-yet-created
+  release version was incorrectly flagged as invalid.
+- **`import`: `Sprint` column values now resolve to the Jira sprint ID that
+  field actually requires, instead of being rejected.** Jira's Sprint custom
+  field requires a bare numeric sprint ID, not a sprint name string — a
+  spreadsheet value like `PI-28.6-Calc -TI83` was previously sent through
+  unchanged, which Jira rejected with `Specify a valid value for Sprint`.
+  `import` now resolves `Sprint` the same way it already resolves `Parent`:
+  values that already look like a numeric ID are used directly, and anything
+  else is looked up by exact sprint name against the team config's
+  `board_id` (the same board `plan`'s sprint assignment uses). An
+  unresolvable value or a missing `board_id` is skipped with a warning; the
+  rest of the issue is still created.
+
 ## [1.2.5] — 2026-07-17
 
 ### Fixed
@@ -165,6 +229,9 @@ Initial release.
 - CSV encoding auto-detection with `--encoding` override.
 - Preview-first safety model: `--dry-run` on every command.
 
+[1.2.8]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.2.8
+[1.2.7]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.2.7
+[1.2.6]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.2.6
 [1.2.5]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.2.5
 [1.2.4]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.2.4
 [1.2.3]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.2.3
