@@ -17,8 +17,8 @@ All notable changes to Jiramator are documented here. This project adheres to
   failing (see the updated README "Set credentials" section).
 
 ### Fixed
-- Fixed two bugs in the initial implementation that made the validation
-  above a silent no-op: `get_createmeta_fields()` read the wrong JSON key
+- Fixed two bugs in the initial implementation of the validation above that
+  made it a silent no-op: `get_createmeta_fields()` read the wrong JSON key
   (`values` instead of `fields`) so it always returned empty metadata, and
   neither `get_createmeta_fields()` nor `get_createmeta_issue_types()`
   paginated correctly (both endpoints omit the `isLast` key that other Jira
@@ -27,6 +27,17 @@ All notable changes to Jiramator are documented here. This project adheres to
   checked against Jira's list of *already-existing* versions — but `plan`'s
   entire purpose is to reference/create new ones, so every not-yet-created
   release version was incorrectly flagged as invalid.
+- **`import`: `Sprint` column values now resolve to the Jira sprint ID that
+  field actually requires, instead of being rejected.** Jira's Sprint custom
+  field requires a bare numeric sprint ID, not a sprint name string — a
+  spreadsheet value like `PI-28.6-Calc -TI83` was previously sent through
+  unchanged, which Jira rejected with `Specify a valid value for Sprint`.
+  `import` now resolves `Sprint` the same way it already resolves `Parent`:
+  values that already look like a numeric ID are used directly, and anything
+  else is looked up by exact sprint name against the team config's
+  `board_id` (the same board `plan`'s sprint assignment uses). An
+  unresolvable value or a missing `board_id` is skipped with a warning; the
+  rest of the issue is still created.
 
 ## [1.2.5] — 2026-07-17
 

@@ -19,6 +19,10 @@ from jiramator.value_coercion import coerce_field_value, should_omit_value
 # a live lookup (see _resolve_parent_field in run_import).
 _ISSUE_KEY_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]*-\d+$")
 
+# Matches a bare integer — a Sprint column value that's already a Jira
+# sprint ID, as opposed to a sprint name needing a live board lookup.
+_SPRINT_ID_RE = re.compile(r"^\d+$")
+
 
 # ---------------------------------------------------------------------------
 # Phase 02-02 scope note — Template inheritance does NOT apply to imports.
@@ -80,6 +84,11 @@ _DIRECT_FIELDS = {"summary"}
 # requires, so they're resolved in run_import() at create-time rather than
 # coerced here.
 _DEFERRED_FIELDS = {"reporter", "assignee", "parent"}
+# Sprint's Jira field ID varies per org (org_config.custom_fields["sprint_field"],
+# see planner._DEFAULT_SPRINT_FIELD) — unlike the fixed field names above, it
+# must be deferred by logical_name, not jira_field. See resolved.logical_name
+# in build_row_payload/run_import.
+_DEFERRED_LOGICAL_FIELDS = {"sprint_field"}
 
 
 def _build_resolved_value(
@@ -139,7 +148,7 @@ def build_row_payload(
             warnings.append(f"Row {row_number}: skipped unresolved column '{source_header}'")
             continue
 
-        if resolved.jira_field in _DEFERRED_FIELDS:
+        if resolved.jira_field in _DEFERRED_FIELDS or resolved.logical_name in _DEFERRED_LOGICAL_FIELDS:
             continue
 
         if should_omit_value(coerced):
@@ -334,10 +343,15 @@ def run_import(
     # can look up the raw value by the actual header name rather than
     # hardcoding e.g. "Reporter".
     deferred_headers: dict[str, set[str]] = {field_name: set() for field_name in _DEFERRED_FIELDS}
+    sprint_field_headers: set[str] = set()
+    sprint_jira_field: str | None = None
     for row_result in preview.row_results:
         for source_header, resolved in row_result.resolved_columns.items():
             if resolved.jira_field in deferred_headers:
                 deferred_headers[resolved.jira_field].add(source_header)
+            if resolved.logical_name in _DEFERRED_LOGICAL_FIELDS:
+                sprint_field_headers.add(source_header)
+                sprint_jira_field = resolved.jira_field
 
     # Parent values that are already Jira keys (e.g. "CA-5079") don't need a
     # summary lookup; only summary-shaped values do.
@@ -355,6 +369,27 @@ def run_import(
             team_config.project_key,
             list(parent_summaries_to_lookup),
         )
+
+    # Sprint values that are already numeric IDs don't need a name lookup;
+    # only name-shaped values do (e.g. "PI-28.6-Calc -TI83", matched against
+    # sprint names on the team's configured board — same board/name-matching
+    # source as plan's _resolve_sprint_ids, but by exact name here instead of
+    # a {pi_num}/{sprint_num} template).
+    sprint_names_to_lookup: set[str] = set()
+    for row in rows:
+        for header in sprint_field_headers:
+            sprint_value = row.get(header)
+            if isinstance(sprint_value, str) and sprint_value.strip():
+                cleaned = sprint_value.strip()
+                if not _SPRINT_ID_RE.match(cleaned):
+                    sprint_names_to_lookup.add(cleaned)
+    sprint_ids_by_name: dict[str, int] = {}
+    if sprint_names_to_lookup and team_config.board_id is not None:
+        for sprint in client.get_board_sprints(team_config.board_id, state="future,active"):
+            name = sprint.get("name")
+            sprint_id = sprint.get("id")
+            if name in sprint_names_to_lookup and isinstance(sprint_id, int):
+                sprint_ids_by_name[name] = sprint_id
 
     try:
         for result in preview.row_results:
@@ -417,6 +452,31 @@ def run_import(
                             result.warnings.append(
                                 f"Row {result.row_number}: could not resolve parent "
                                 f"'{cleaned}' from column '{header}' to a Jira issue key"
+                            )
+                    break
+
+            for header in sprint_field_headers:
+                sprint_value = source_row.get(header)
+                if isinstance(sprint_value, str) and sprint_value.strip():
+                    cleaned = sprint_value.strip()
+                    assert sprint_jira_field is not None  # set alongside sprint_field_headers
+                    if _SPRINT_ID_RE.match(cleaned):
+                        payload["fields"][sprint_jira_field] = int(cleaned)
+                    elif team_config.board_id is None:
+                        result.warnings.append(
+                            f"Row {result.row_number}: could not resolve sprint "
+                            f"'{cleaned}' from column '{header}' — no board_id "
+                            f"configured for team '{team_config.team_name}'"
+                        )
+                    else:
+                        sprint_id = sprint_ids_by_name.get(cleaned)
+                        if sprint_id is not None:
+                            payload["fields"][sprint_jira_field] = sprint_id
+                        else:
+                            result.warnings.append(
+                                f"Row {result.row_number}: could not resolve sprint "
+                                f"'{cleaned}' from column '{header}' to a Jira sprint "
+                                f"on board {team_config.board_id}"
                             )
                     break
 

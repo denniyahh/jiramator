@@ -373,15 +373,19 @@ catch a typo before anything is created.
 > passes through unchanged. See `configs/org.example/example.yaml` for a
 > full example.
 
-> **Assignee/Reporter and Parent columns:** Jira requires `assignee` and
-> `reporter` as a user object (`{"accountId": "..."}`), not a name or email
-> string, and `parent` as an issue-key object (`{"key": "CA-1234"}`), not a
-> summary string. `import` resolves these for you at create time: `Assignee`/
+> **Assignee/Reporter, Parent, and Sprint columns:** Jira requires `assignee`
+> and `reporter` as a user object (`{"accountId": "..."}`), not a name or
+> email string; `parent` as an issue-key object (`{"key": "CA-1234"}`), not a
+> summary string; and Sprint as a bare numeric sprint ID, not a sprint name
+> string. `import` resolves all three for you at create time: `Assignee`/
 > `Reporter` values are looked up by display name or email via Jira's user
 > search; `Parent` values that already look like a Jira key (e.g. `CA-1234`)
 > are used directly, and anything else is looked up by exact issue summary
-> match in your project. If a value can't be resolved, that one field is
-> skipped (with a warning) and the rest of the issue is still created.
+> match in your project; Sprint values that are already a numeric ID (e.g.
+> `15873`) are used directly, and anything else is looked up by exact sprint
+> name against your team config's `board_id` (same board used by `plan`'s
+> sprint assignment). If a value can't be resolved, that one field is skipped
+> (with a warning) and the rest of the issue is still created.
 
 ### 3. Mass Ticket Updating (`update`)
 
