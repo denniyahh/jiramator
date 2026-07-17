@@ -545,6 +545,115 @@ class TestRunImport:
         assert "parent" not in payload["fields"]
         assert result.created == [(1, "Risk A", "CA-5007")]
 
+    def test_resolves_sprint_from_numeric_id(self):
+        from jiramator.importer import run_import
+
+        org = _org_config()
+        org.bulk_create.field_aliases["Sprint"] = "sprint_field"
+        org.custom_fields["sprint_field"] = "customfield_10021"
+
+        rows = [{"Summary": "Risk A", "Sprint": "15873"}]
+        client = MagicMock()
+        client.find_issue_keys_by_summaries.return_value = {}
+        client.create_issue.return_value = "CA-6001"
+
+        result = run_import(
+            rows,
+            org_config=org,
+            team_config=_team_config(),
+            jira_fields=[],
+            client=client,
+        )
+
+        payload = client.create_issue.call_args.args[0]
+        assert payload["fields"]["customfield_10021"] == 15873
+        client.get_board_sprints.assert_not_called()
+        assert result.created == [(1, "Risk A", "CA-6001")]
+
+    def test_resolves_sprint_from_name_lookup(self):
+        from jiramator.importer import run_import
+        from jiramator.config import TeamConfig
+
+        org = _org_config()
+        org.bulk_create.field_aliases["Sprint"] = "sprint_field"
+        org.custom_fields["sprint_field"] = "customfield_10021"
+        team_config = TeamConfig(project_key="CA", team_name="Calcs", board_id=362)
+
+        rows = [{"Summary": "Risk A", "Sprint": "PI-28.6-Calc -TI83"}]
+        client = MagicMock()
+        client.find_issue_keys_by_summaries.return_value = {}
+        client.get_board_sprints.return_value = [
+            {"id": 15873, "name": "PI-28.6-Calc -TI83", "state": "active"},
+            {"id": 18059, "name": "PI-26.4 Sprint1-Calc -TI83", "state": "future"},
+        ]
+        client.create_issue.return_value = "CA-6002"
+
+        result = run_import(
+            rows,
+            org_config=org,
+            team_config=team_config,
+            jira_fields=[],
+            client=client,
+        )
+
+        payload = client.create_issue.call_args.args[0]
+        assert payload["fields"]["customfield_10021"] == 15873
+        client.get_board_sprints.assert_called_once_with(362, state="future,active")
+        assert result.created == [(1, "Risk A", "CA-6002")]
+
+    def test_unresolvable_sprint_name_warns_and_creates_without_it(self):
+        from jiramator.importer import run_import
+        from jiramator.config import TeamConfig
+
+        org = _org_config()
+        org.bulk_create.field_aliases["Sprint"] = "sprint_field"
+        org.custom_fields["sprint_field"] = "customfield_10021"
+        team_config = TeamConfig(project_key="CA", team_name="Calcs", board_id=362)
+
+        rows = [{"Summary": "Risk A", "Sprint": "Nonexistent Sprint"}]
+        client = MagicMock()
+        client.find_issue_keys_by_summaries.return_value = {}
+        client.get_board_sprints.return_value = []
+        client.create_issue.return_value = "CA-6003"
+
+        result = run_import(
+            rows,
+            org_config=org,
+            team_config=team_config,
+            jira_fields=[],
+            client=client,
+        )
+
+        payload = client.create_issue.call_args.args[0]
+        assert "customfield_10021" not in payload["fields"]
+        assert result.created == [(1, "Risk A", "CA-6003")]
+
+    def test_sprint_name_without_board_id_warns_and_creates_without_it(self):
+        """No board_id configured — sprint name can't be looked up at all."""
+        from jiramator.importer import run_import
+
+        org = _org_config()
+        org.bulk_create.field_aliases["Sprint"] = "sprint_field"
+        org.custom_fields["sprint_field"] = "customfield_10021"
+
+        rows = [{"Summary": "Risk A", "Sprint": "PI-28.6-Calc -TI83"}]
+        client = MagicMock()
+        client.find_issue_keys_by_summaries.return_value = {}
+        client.create_issue.return_value = "CA-6004"
+
+        result = run_import(
+            rows,
+            org_config=org,
+            team_config=_team_config(),  # no board_id
+            jira_fields=[],
+            client=client,
+        )
+
+        payload = client.create_issue.call_args.args[0]
+        assert "customfield_10021" not in payload["fields"]
+        client.get_board_sprints.assert_not_called()
+        assert result.created == [(1, "Risk A", "CA-6004")]
+
     def test_dry_run_does_not_require_client(self):
         from jiramator.importer import run_import
 
