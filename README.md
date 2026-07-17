@@ -154,16 +154,20 @@ $env:JIRA_EMAIL = "you@company.com"
 $env:JIRA_TOKEN = "your-jira-api-token"
 ```
 
-Credentials aren't strictly required to preview: `import --dry-run` never
-reads them, so you can try it out before you ever create a token.
-`plan --dry-run` and `update --dry-run` both opportunistically use live Jira
-access when available — `plan` validates every built ticket's fields against
-Jira's live schema before you ever confirm creation (catching missing
-required fields, ADF/plain-text mismatches, and invalid select values up
-front), and `update` fetches field metadata to preview value coercion. If
-credentials are missing or Jira is unreachable, `plan --dry-run` degrades
-gracefully — it warns and still completes an unvalidated preview rather than
-failing; `update --dry-run` requires credentials outright.
+Credentials aren't strictly required to preview: `plan --dry-run` and
+`import --dry-run` both opportunistically use live Jira access when
+available, but never *require* it. `plan` validates every built ticket's
+fields against Jira's live schema before you ever confirm creation (catching
+missing required fields, ADF/plain-text mismatches, and invalid select
+values up front). `import` fetches live field metadata so the preview
+correctly resolves columns that only match by Jira's actual field name
+(rather than an explicit `field_aliases` entry) — without it, those columns
+would show as unresolved in the preview even though a live run resolves them
+fine. If credentials are missing or Jira is unreachable, both degrade
+gracefully — they warn and still complete an offline preview rather than
+failing. `update --dry-run` is the one exception: it *requires* credentials
+outright, since it fetches field metadata to preview value coercion and has
+no offline fallback.
 
 ### Configure your org and team
 
@@ -401,12 +405,13 @@ jiramator update --dry-run ~/my-updates.xlsx   # preview — changes nothing
 jiramator update ~/my-updates.xlsx             # live — updates issues row by row
 ```
 
-> Unlike `import`, `update --dry-run` still *requires* valid Jira credentials
-> and network access — it fetches field metadata from Jira to preview
-> coercion, and fails outright if it can't. (`plan --dry-run` also uses live
-> Jira access when available, for field validation, but degrades gracefully
-> to an unvalidated preview if credentials are missing — see
-> [Set credentials](#set-credentials).) `update --dry-run` changes nothing,
+> Unlike `plan`/`import`, `update --dry-run` still *requires* valid Jira
+> credentials and network access — it fetches field metadata from Jira to
+> preview coercion, and fails outright if it can't. `plan --dry-run` and
+> `import --dry-run` also use live Jira access when available (for field
+> validation and column resolution, respectively), but both degrade
+> gracefully to an offline preview if credentials are missing — see
+> [Set credentials](#set-credentials). `update --dry-run` changes nothing,
 > but it isn't credential-free.
 >
 > The `bulk_create.value_aliases` shorthand-to-Jira-label mapping described

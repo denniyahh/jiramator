@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import click
+import requests
 from rich.console import Console
 
 from jiramator.config import load_org_config, load_team_config
@@ -602,11 +603,31 @@ def import_command(
         )
 
     if dry_run:
+        # Opportunistically fetch live field metadata so the preview reflects
+        # auto-lookup columns (e.g. Assignee, Parent, Sprint, custom fields
+        # not in field_aliases) the same way a live run would resolve them.
+        # Degrades gracefully to an offline preview if credentials are
+        # missing or Jira is unreachable — dry-run never fails because of
+        # this, it just falls back to field_aliases-only resolution.
+        jira_fields = None
+        try:
+            jira_fields = JiraClient(org_config).get_fields()
+        except ValueError as exc:
+            console.print(
+                f"[yellow]⚠ Preview based on field_aliases only (no Jira "
+                f"credentials available): {exc}[/]"
+            )
+        except (JiraApiError, requests.exceptions.RequestException) as exc:
+            console.print(
+                f"[yellow]⚠ Preview based on field_aliases only (could not "
+                f"reach Jira): {exc}[/]"
+            )
+
         result = run_import(
             rows,
             org_config=org_config,
             team_config=team_config,
-            jira_fields=None,
+            jira_fields=jira_fields,
             client=None,
             dry_run=True,
         )
