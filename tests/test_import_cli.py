@@ -38,6 +38,10 @@ class TestImportCommand:
         team_config_path: Path,
         tmp_path: Path,
     ):
+        """Dry-run opportunistically fetches live field metadata for a more
+        accurate preview (see cli.py's import_command), but never creates
+        issues — create_issue/create_issues_bulk must never be called.
+        """
         sheet_path = tmp_path / "import.csv"
         sheet_path.write_text("Summary,API Impact\nRisk A,No\n")
 
@@ -51,7 +55,9 @@ class TestImportCommand:
         monkeypatch.setattr("jiramator.cli.build_preview_report", lambda *args, **kwargs: fake_report)
         monkeypatch.setattr("jiramator.cli.render_preview_report", lambda *args, **kwargs: "PREVIEW REPORT")
 
-        jira_client_ctor = MagicMock()
+        mock_client = MagicMock()
+        mock_client.get_fields.return_value = []
+        jira_client_ctor = MagicMock(return_value=mock_client)
         monkeypatch.setattr("jiramator.cli.JiraClient", jira_client_ctor)
 
         result = runner.invoke(
@@ -69,7 +75,92 @@ class TestImportCommand:
 
         assert result.exit_code == 0
         assert "PREVIEW REPORT" in result.output
-        jira_client_ctor.assert_not_called()
+        mock_client.create_issue.assert_not_called()
+        mock_client.create_issues_bulk.assert_not_called()
+
+    def test_dry_run_degrades_gracefully_without_credentials(
+        self,
+        runner: CliRunner,
+        monkeypatch: pytest.MonkeyPatch,
+        org_config_path: Path,
+        team_config_path: Path,
+        tmp_path: Path,
+    ):
+        """No Jira credentials available → dry-run warns and still completes."""
+        sheet_path = tmp_path / "import.csv"
+        sheet_path.write_text("Summary,API Impact\nRisk A,No\n")
+
+        fake_report = MagicMock()
+        fake_report.total_rows = 1
+        fake_report.successful_rows = 1
+        fake_report.failed_rows = 0
+        fake_report.row_results = []
+
+        monkeypatch.setattr("jiramator.cli.read_spreadsheet", lambda *args, **kwargs: [{"Summary": "Risk A", "API Impact": "No"}])
+        monkeypatch.setattr("jiramator.cli.build_preview_report", lambda *args, **kwargs: fake_report)
+        monkeypatch.setattr("jiramator.cli.render_preview_report", lambda *args, **kwargs: "PREVIEW REPORT")
+        monkeypatch.setattr(
+            "jiramator.cli.JiraClient",
+            MagicMock(side_effect=ValueError("JIRA_TOKEN env var not set")),
+        )
+
+        result = runner.invoke(
+            cli,
+            [
+                "import",
+                "--org-config",
+                str(org_config_path),
+                "--team-config",
+                str(team_config_path),
+                "--dry-run",
+                str(sheet_path),
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert "PREVIEW REPORT" in result.output
+
+    def test_dry_run_degrades_gracefully_when_jira_unreachable(
+        self,
+        runner: CliRunner,
+        monkeypatch: pytest.MonkeyPatch,
+        org_config_path: Path,
+        team_config_path: Path,
+        tmp_path: Path,
+    ):
+        """Jira reachable at auth but get_fields() fails → dry-run still completes."""
+        sheet_path = tmp_path / "import.csv"
+        sheet_path.write_text("Summary,API Impact\nRisk A,No\n")
+
+        fake_report = MagicMock()
+        fake_report.total_rows = 1
+        fake_report.successful_rows = 1
+        fake_report.failed_rows = 0
+        fake_report.row_results = []
+
+        monkeypatch.setattr("jiramator.cli.read_spreadsheet", lambda *args, **kwargs: [{"Summary": "Risk A", "API Impact": "No"}])
+        monkeypatch.setattr("jiramator.cli.build_preview_report", lambda *args, **kwargs: fake_report)
+        monkeypatch.setattr("jiramator.cli.render_preview_report", lambda *args, **kwargs: "PREVIEW REPORT")
+
+        mock_client = MagicMock()
+        mock_client.get_fields.side_effect = JiraApiError("Server Error", status_code=500)
+        monkeypatch.setattr("jiramator.cli.JiraClient", MagicMock(return_value=mock_client))
+
+        result = runner.invoke(
+            cli,
+            [
+                "import",
+                "--org-config",
+                str(org_config_path),
+                "--team-config",
+                str(team_config_path),
+                "--dry-run",
+                str(sheet_path),
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert "PREVIEW REPORT" in result.output
 
     def test_unsupported_extension_exits_nonzero_with_clear_message(
         self,

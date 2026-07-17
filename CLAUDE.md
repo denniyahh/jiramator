@@ -86,12 +86,14 @@ failed run and a `--resume` attempt. `plan` and `import` write JSON reports to
 support resume.
 
 **Credentials:** Never stored in config files. Read from env vars (`JIRA_EMAIL`, `JIRA_TOKEN`
-by default; overridable per-org config via `jira_email_env`/`jira_token_env`). `import --dry-run`
-needs no credentials. `plan --dry-run` opportunistically builds a client to validate every built
-ticket's fields against Jira's live createmeta schema (see `payload_validator.py` and
-`planner._preflight_validate()`) — it degrades gracefully to an unvalidated preview if credentials
-are missing or Jira is unreachable, but doesn't fail. `update --dry-run` *requires* credentials
-outright (it fetches live field metadata for coercion preview and fails without them).
+by default; overridable per-org config via `jira_email_env`/`jira_token_env`). `plan --dry-run`
+opportunistically builds a client to validate every built ticket's fields against Jira's live
+createmeta schema (see `payload_validator.py` and `planner._preflight_validate()`). `import --dry-run`
+opportunistically fetches `client.get_fields()` so the preview correctly resolves columns that
+only match by Jira's live field name (`auto_lookup_unknown_fields`), not just `field_aliases`.
+Both degrade gracefully to an offline/unvalidated preview if credentials are missing or Jira is
+unreachable, but neither fails because of it. `update --dry-run` *requires* credentials outright
+(it fetches live field metadata for coercion preview and fails without them).
 
 **Corporate TLS interception:** `jira_client.py` supports `JIRAMATOR_CA_BUNDLE` (custom CA
 bundle path) and `JIRAMATOR_RELAX_TLS_STRICT=1` (relaxes the "Basic Constraints not marked
