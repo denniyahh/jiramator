@@ -3,6 +3,20 @@
 All notable changes to Jiramator are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.7] — 2026-07-17
+
+### Fixed
+- **`import --dry-run` no longer shows false "skipped unresolved column"
+  warnings for columns that only resolve via live Jira field metadata.**
+  Columns not explicitly listed in `bulk_create.field_aliases` — such as
+  `Assignee`, `Parent`, `Sprint`, or any custom field matched by its live
+  Jira display name (`auto_lookup_unknown_fields`) — previously only
+  resolved during a live run, since dry-run never called Jira at all.
+  `import --dry-run` now opportunistically fetches live field metadata
+  (`client.get_fields()`) for a preview that accurately reflects what a live
+  run will do, and degrades gracefully to the previous `field_aliases`-only
+  preview if credentials are missing or Jira is unreachable.
+
 ## [1.2.6] — 2026-07-17
 
 ### Added
@@ -201,6 +215,7 @@ Initial release.
 - CSV encoding auto-detection with `--encoding` override.
 - Preview-first safety model: `--dry-run` on every command.
 
+[1.2.7]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.2.7
 [1.2.6]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.2.6
 [1.2.5]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.2.5
 [1.2.4]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.2.4
