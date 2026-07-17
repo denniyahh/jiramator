@@ -3,6 +3,20 @@
 All notable changes to Jiramator are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.8] — 2026-07-17
+
+### Changed
+- **`configs/org.example/marketaxess.yaml` — added `field_aliases` entries
+  for `Acceptance Criteria`, `Assignee`, `Parent`, `Sprint`, `Product
+  Horizontals (Finance)`, and `Product Verticals (Finance)`.** These columns
+  previously had no explicit alias, so they only resolved via a live lookup
+  against Jira's field metadata (`auto_lookup_unknown_fields`) rather than
+  the org config — meaning `import`/`update` needed live Jira access to
+  resolve them at all (v1.2.7 made `import --dry-run` do this
+  opportunistically, but it's still a live dependency). Declaring them in
+  `field_aliases` explicitly resolves them from config alone, with no
+  network dependency either way.
+
 ## [1.2.7] — 2026-07-17
 
 ### Fixed
@@ -215,6 +229,7 @@ Initial release.
 - CSV encoding auto-detection with `--encoding` override.
 - Preview-first safety model: `--dry-run` on every command.
 
+[1.2.8]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.2.8
 [1.2.7]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.2.7
 [1.2.6]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.2.6
 [1.2.5]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.2.5
