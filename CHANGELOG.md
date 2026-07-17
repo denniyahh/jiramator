@@ -3,6 +3,21 @@
 All notable changes to Jiramator are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.6] — 2026-07-17
+
+### Fixed
+- **`import`: `Sprint` column values now resolve to the Jira sprint ID that
+  field actually requires, instead of being rejected.** Jira's Sprint custom
+  field requires a bare numeric sprint ID, not a sprint name string — a
+  spreadsheet value like `PI-28.6-Calc -TI83` was previously sent through
+  unchanged, which Jira rejected with `Specify a valid value for Sprint`.
+  `import` now resolves `Sprint` the same way it already resolves `Parent`:
+  values that already look like a numeric ID are used directly, and anything
+  else is looked up by exact sprint name against the team config's
+  `board_id` (the same board `plan`'s sprint assignment uses). An
+  unresolvable value or a missing `board_id` is skipped with a warning; the
+  rest of the issue is still created.
+
 ## [1.2.5] — 2026-07-17
 
 ### Fixed
@@ -165,6 +180,7 @@ Initial release.
 - CSV encoding auto-detection with `--encoding` override.
 - Preview-first safety model: `--dry-run` on every command.
 
+[1.2.6]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.2.6
 [1.2.5]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.2.5
 [1.2.4]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.2.4
 [1.2.3]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.2.3
