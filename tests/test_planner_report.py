@@ -155,6 +155,11 @@ class FakeJiraClient:
     def find_user_account_id(self, name):  # pragma: no cover
         return None
 
+    def get_createmeta_fields_by_type_name(self, project_key, issue_type_name):
+        # No metadata configured — nothing to check against, so the
+        # pre-flight validator finds zero problems for every payload.
+        return {}
+
 
 # ---------------------------------------------------------------------------
 # Helpers

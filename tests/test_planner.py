@@ -359,7 +359,7 @@ class TestRunPlanDryRun:
 
     @patch("jiramator.planner.Prompt.ask")
     @patch("jiramator.planner.IntPrompt.ask")
-    def test_dry_run_no_client(
+    def test_dry_run_validates_fields_via_client(
         self,
         mock_int_prompt,
         mock_prompt,
@@ -367,14 +367,47 @@ class TestRunPlanDryRun:
         team_config,
         console,
     ):
-        """In dry-run mode, JiraClient is never constructed."""
-        # Prompt sequence: PI number, then release count, then version string
+        """Dry-run opportunistically builds a client for live field validation.
+
+        Unlike import/update, plan --dry-run is not credential-free: it
+        constructs a JiraClient to fetch createmeta and validate every
+        built payload before persisting a dry-run success (see
+        planner.py's module docstring and _preflight_validate). Nothing is
+        ever created — only createmeta is fetched.
+        """
         mock_prompt.side_effect = ["28", "26.1.1"]
         mock_int_prompt.return_value = 1
 
         with patch("jiramator.planner.JiraClient") as mock_jira_cls:
+            mock_client = MagicMock()
+            mock_jira_cls.return_value = mock_client
+            mock_client.get_createmeta_fields_by_type_name.return_value = {}
+
             run_plan(org_config, team_config, dry_run=True, console=console)
-            mock_jira_cls.assert_not_called()
+
+            mock_jira_cls.assert_called_once()
+            mock_client.create_issue.assert_not_called()
+            mock_client.create_issues_bulk.assert_not_called()
+
+    @patch("jiramator.planner.Prompt.ask")
+    @patch("jiramator.planner.IntPrompt.ask")
+    def test_dry_run_degrades_gracefully_without_credentials(
+        self,
+        mock_int_prompt,
+        mock_prompt,
+        org_config,
+        team_config,
+        console,
+    ):
+        """No Jira credentials available → dry-run warns and still completes."""
+        mock_prompt.side_effect = ["28", "26.1.1"]
+        mock_int_prompt.return_value = 1
+
+        with patch("jiramator.planner.JiraClient") as mock_jira_cls:
+            mock_jira_cls.side_effect = ValueError("JIRA_TOKEN env var not set")
+
+            # Should not raise — dry-run degrades to an unvalidated preview.
+            run_plan(org_config, team_config, dry_run=True, console=console)
 
     @patch("jiramator.planner.Prompt.ask")
     @patch("jiramator.planner.IntPrompt.ask")
@@ -439,6 +472,9 @@ class TestRunPlanFullFlow:
         # --- JiraClient stubs ---
         mock_client = MagicMock()
         mock_jira_cls.return_value = mock_client
+        # Pre-flight field validation finds nothing to check against — no
+        # createmeta metadata configured, so every payload passes.
+        mock_client.get_createmeta_fields_by_type_name.return_value = {}
 
         # get_fix_versions → empty list (all missing)
         mock_client.get_fix_versions.return_value = []
@@ -481,6 +517,7 @@ class TestRunPlanFullFlow:
 
         mock_client = MagicMock()
         mock_jira_cls.return_value = mock_client
+        mock_client.get_createmeta_fields_by_type_name.return_value = {}
         mock_client.get_fix_versions.return_value = [{"name": "26.1.1", "id": "100"}]
 
         with pytest.raises(SystemExit):
@@ -530,6 +567,7 @@ class TestRunPlanFullFlow:
 
         mock_client = MagicMock()
         mock_jira_cls.return_value = mock_client
+        mock_client.get_createmeta_fields_by_type_name.return_value = {}
         mock_client.get_fix_versions.return_value = []
         mock_client.create_fix_version.return_value = {"name": "26.1.1", "id": "100"}
         mock_client.create_issue.side_effect = JiraApiError("Forbidden", status_code=403)
@@ -558,6 +596,7 @@ class TestRunPlanFullFlow:
 
         mock_client = MagicMock()
         mock_jira_cls.return_value = mock_client
+        mock_client.get_createmeta_fields_by_type_name.return_value = {}
         mock_client.get_fix_versions.return_value = []
         mock_client.create_fix_version.return_value = {"name": "26.1.1", "id": "100"}
         mock_client.create_issue.return_value = "TST-500"
@@ -594,6 +633,7 @@ class TestRunPlanFullFlow:
 
         mock_client = MagicMock()
         mock_jira_cls.return_value = mock_client
+        mock_client.get_createmeta_fields_by_type_name.return_value = {}
         mock_client.get_fix_versions.return_value = []
         mock_client.create_fix_version.return_value = {"name": "26.1.1", "id": "100"}
         mock_client.create_issue.return_value = "TST-500"
@@ -804,13 +844,22 @@ class TestRunPlanNonInteractive:
     def test_inputs_skip_prompts_in_dry_run(
         self, mock_int_prompt, mock_prompt, org_config, team_config, console
     ):
-        """With inputs= supplied, no Rich prompts are invoked."""
+        """With inputs= supplied, no Rich prompts are invoked.
+
+        JiraClient IS still constructed in dry-run (for live field
+        validation — see TestRunPlanDryRun), but no issues are created.
+        """
         inputs = make_plan_inputs("28", ["26.1.1"])
         with patch("jiramator.planner.JiraClient") as mock_jira_cls:
+            mock_client = MagicMock()
+            mock_jira_cls.return_value = mock_client
+            mock_client.get_createmeta_fields_by_type_name.return_value = {}
+
             run_plan(
                 org_config, team_config, dry_run=True, console=console, inputs=inputs
             )
-            mock_jira_cls.assert_not_called()
+            mock_client.create_issue.assert_not_called()
+            mock_client.create_issues_bulk.assert_not_called()
         mock_prompt.assert_not_called()
         mock_int_prompt.assert_not_called()
 
@@ -822,6 +871,7 @@ class TestRunPlanNonInteractive:
         """With assume_yes, run_plan creates without any Confirm prompt."""
         mock_client = MagicMock()
         mock_jira_cls.return_value = mock_client
+        mock_client.get_createmeta_fields_by_type_name.return_value = {}
         mock_client.get_fix_versions.return_value = []
         mock_client.create_fix_version.return_value = {"name": "26.1.1", "id": "100"}
         mock_client.create_issue.return_value = "TST-500"
