@@ -19,6 +19,15 @@ from typing import Any
 # computes/derives and never expects the caller to check against createmeta.
 _SKIP_FIELD_IDS = frozenset({"project"})
 
+# Fields whose createmeta `allowedValues` list is a snapshot of *currently
+# existing* Jira values, not a fixed option set — plan's whole purpose is to
+# reference/create new values here (see planner._check_and_create_fix_versions),
+# so checking fixVersions against createmeta's allowedValues would flag every
+# not-yet-created release as invalid. Required-ness and ADF checks (neither
+# applicable to fixVersions) still apply; only the allowedValues check is
+# skipped for these fields.
+_SKIP_ALLOWED_VALUES_FIELD_IDS = frozenset({"fixVersions"})
+
 
 def _is_textarea_or_richtext(field_id: str, schema: dict[str, Any]) -> bool:
     """Return whether a createmeta field schema is a rich-text/ADF field.
@@ -134,7 +143,7 @@ def validate_ticket_payload(
             )
 
         allowed_values = meta.get("allowedValues")
-        if allowed_values:
+        if allowed_values and field_id not in _SKIP_ALLOWED_VALUES_FIELD_IDS:
             names, ids = _allowed_value_tokens(allowed_values)
             candidates = value if isinstance(value, list) else [value]
             for candidate in candidates:

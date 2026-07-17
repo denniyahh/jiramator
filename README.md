@@ -154,11 +154,16 @@ $env:JIRA_EMAIL = "you@company.com"
 $env:JIRA_TOKEN = "your-jira-api-token"
 ```
 
-Credentials aren't needed to preview: `plan --dry-run` and `import --dry-run`
-never read them, so you can try those out before you ever create a token.
-`update --dry-run` is the one exception — it still needs valid credentials
-and live Jira access, because it fetches field metadata to preview how your
-spreadsheet values will be coerced.
+Credentials aren't strictly required to preview: `import --dry-run` never
+reads them, so you can try it out before you ever create a token.
+`plan --dry-run` and `update --dry-run` both opportunistically use live Jira
+access when available — `plan` validates every built ticket's fields against
+Jira's live schema before you ever confirm creation (catching missing
+required fields, ADF/plain-text mismatches, and invalid select values up
+front), and `update` fetches field metadata to preview value coercion. If
+credentials are missing or Jira is unreachable, `plan --dry-run` degrades
+gracefully — it warns and still completes an unvalidated preview rather than
+failing; `update --dry-run` requires credentials outright.
 
 ### Configure your org and team
 
@@ -392,9 +397,13 @@ jiramator update --dry-run ~/my-updates.xlsx   # preview — changes nothing
 jiramator update ~/my-updates.xlsx             # live — updates issues row by row
 ```
 
-> Unlike `plan`/`import`, `update --dry-run` still requires valid Jira
-> credentials and network access — it fetches field metadata from Jira to
-> preview coercion. It changes nothing, but it isn't credential-free.
+> Unlike `import`, `update --dry-run` still *requires* valid Jira credentials
+> and network access — it fetches field metadata from Jira to preview
+> coercion, and fails outright if it can't. (`plan --dry-run` also uses live
+> Jira access when available, for field validation, but degrades gracefully
+> to an unvalidated preview if credentials are missing — see
+> [Set credentials](#set-credentials).) `update --dry-run` changes nothing,
+> but it isn't credential-free.
 >
 > The `bulk_create.value_aliases` shorthand-to-Jira-label mapping described
 > above (for Risk fields like Code Complexity/QA Testing/Risk Impact/Risk

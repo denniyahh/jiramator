@@ -512,10 +512,14 @@ class JiraClient:
                     f"fetching create-issue metadata for project {project_key}",
                 )
             data = response.json()
-            issue_types.extend(data.get("issueTypes", []))
-            if data.get("isLast", True):
+            page = data.get("issueTypes", [])
+            issue_types.extend(page)
+            # This endpoint's response never includes `isLast` (unlike the
+            # Agile board/sprint endpoint) — confirmed against live Jira Cloud.
+            # Pagination must be driven by total/startAt/page-size instead.
+            start_at += len(page)
+            if not page or start_at >= data.get("total", start_at):
                 break
-            start_at += page_size
 
         return issue_types
 
@@ -554,13 +558,18 @@ class JiraClient:
                     f"{issue_type_id} in {project_key}",
                 )
             data = response.json()
-            for entry in data.get("values", []):
+            # The field list is under `fields`, not `values` (confirmed
+            # against live Jira Cloud) — this endpoint also never returns
+            # `isLast`, so pagination is driven by total/startAt like
+            # get_createmeta_issue_types() above.
+            page = data.get("fields", [])
+            for entry in page:
                 field_id = entry.get("fieldId")
                 if field_id:
                     fields[field_id] = entry
-            if data.get("isLast", True):
+            start_at += len(page)
+            if not page or start_at >= data.get("total", start_at):
                 break
-            start_at += page_size
 
         return fields
 
