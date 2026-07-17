@@ -3,6 +3,31 @@
 All notable changes to Jiramator are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.6] — 2026-07-17
+
+### Added
+- **`plan`: live field validation against Jira's createmeta schema, in both
+  `--dry-run` and live runs.** Before any ticket is created, every built
+  payload is checked against the target issue type's actual field
+  requirements — catching missing required fields, plain-text values where
+  Jira expects Atlassian Document Format (ADF), and invalid select-field
+  values before Jira rejects them with a 400. `--dry-run` now opportunistically
+  builds a Jira client for this check; if credentials are missing or Jira is
+  unreachable, it degrades gracefully to an unvalidated preview instead of
+  failing (see the updated README "Set credentials" section).
+
+### Fixed
+- Fixed two bugs in the initial implementation that made the validation
+  above a silent no-op: `get_createmeta_fields()` read the wrong JSON key
+  (`values` instead of `fields`) so it always returned empty metadata, and
+  neither `get_createmeta_fields()` nor `get_createmeta_issue_types()`
+  paginated correctly (both endpoints omit the `isLast` key that other Jira
+  endpoints return, so pagination silently stopped after the first 50
+  results). Also fixed a false positive where `fixVersions` values were
+  checked against Jira's list of *already-existing* versions — but `plan`'s
+  entire purpose is to reference/create new ones, so every not-yet-created
+  release version was incorrectly flagged as invalid.
+
 ## [1.2.5] — 2026-07-17
 
 ### Fixed
@@ -165,6 +190,7 @@ Initial release.
 - CSV encoding auto-detection with `--encoding` override.
 - Preview-first safety model: `--dry-run` on every command.
 
+[1.2.6]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.2.6
 [1.2.5]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.2.5
 [1.2.4]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.2.4
 [1.2.3]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.2.3
