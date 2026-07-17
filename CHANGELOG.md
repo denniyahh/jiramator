@@ -3,6 +3,23 @@
 All notable changes to Jiramator are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.5] — 2026-07-17
+
+### Fixed
+- **`import`: `Assignee`/`Reporter` and `Parent` columns now resolve to the
+  Jira object shapes those fields actually require, instead of failing or
+  silently getting dropped.** Jira's REST API requires `assignee`/`reporter`
+  as `{"accountId": "..."}` and `parent` as `{"key": "CA-1234"}` — not a
+  plain name/email/summary string. Previously, `assignee` values were
+  detected as invalid and skipped with a warning (no fix path), and `parent`
+  values were sent through unchanged, which Jira rejected with a 400
+  (`"data was not an object"`). `import` now resolves `Assignee` the same
+  way `Reporter` already was (via Jira's user search API), and resolves
+  `Parent` by using the value directly if it already looks like a Jira key
+  (e.g. `CA-5079`), or by an exact issue-summary lookup in the target project
+  otherwise. An unresolvable value is skipped with a warning; the rest of
+  the issue is still created.
+
 ## [1.2.4] — 2026-07-17
 
 ### Fixed
@@ -148,6 +165,7 @@ Initial release.
 - CSV encoding auto-detection with `--encoding` override.
 - Preview-first safety model: `--dry-run` on every command.
 
+[1.2.5]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.2.5
 [1.2.4]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.2.4
 [1.2.3]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.2.3
 [1.2.2]: https://github.com/dkim_mktx/jiramator/releases/tag/v1.2.2

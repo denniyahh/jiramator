@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,11 @@ from jiramator.field_resolver import ResolvedField, build_and_coerce_field_value
 from jiramator.jira_client import JiraApiError, JiraClient
 from jiramator.run_report import IssueResult, RunReport, write_report_atomic
 from jiramator.value_coercion import coerce_field_value, should_omit_value
+
+# Matches a Jira issue key like "CA-5079" — used to tell a Parent column
+# value that's already a key apart from one that's an issue summary needing
+# a live lookup (see _resolve_parent_field in run_import).
+_ISSUE_KEY_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]*-\d+$")
 
 
 # ---------------------------------------------------------------------------
@@ -69,7 +75,11 @@ class ImportRunResult:
 
 
 _DIRECT_FIELDS = {"summary"}
-_DEFERRED_FIELDS = {"reporter"}
+# These fields need a live Jira lookup (user search, issue search) to turn a
+# human-readable spreadsheet value into the object shape Jira's REST API
+# requires, so they're resolved in run_import() at create-time rather than
+# coerced here.
+_DEFERRED_FIELDS = {"reporter", "assignee", "parent"}
 
 
 def _build_resolved_value(
@@ -130,12 +140,6 @@ def build_row_payload(
             continue
 
         if resolved.jira_field in _DEFERRED_FIELDS:
-            continue
-
-        if resolved.jira_field == "assignee" and not isinstance(coerced, dict):
-            warnings.append(
-                f"Row {row_number}: skipped unsupported assignee value for column '{source_header}'; expected a Jira user object"
-            )
             continue
 
         if should_omit_value(coerced):
@@ -326,13 +330,31 @@ def run_import(
 
     source_rows_by_number = {index: row for index, row in enumerate(rows, start=1)}
 
-    # Discover which source header(s) resolved to reporter, so we can look up
-    # the value by the actual header name rather than hardcoding "Reporter".
-    reporter_headers: set[str] = set()
+    # Discover which source header(s) resolved to each deferred field, so we
+    # can look up the raw value by the actual header name rather than
+    # hardcoding e.g. "Reporter".
+    deferred_headers: dict[str, set[str]] = {field_name: set() for field_name in _DEFERRED_FIELDS}
     for row_result in preview.row_results:
         for source_header, resolved in row_result.resolved_columns.items():
-            if resolved.jira_field == "reporter":
-                reporter_headers.add(source_header)
+            if resolved.jira_field in deferred_headers:
+                deferred_headers[resolved.jira_field].add(source_header)
+
+    # Parent values that are already Jira keys (e.g. "CA-5079") don't need a
+    # summary lookup; only summary-shaped values do.
+    parent_summaries_to_lookup: set[str] = set()
+    for row in rows:
+        for header in deferred_headers["parent"]:
+            parent_value = row.get(header)
+            if isinstance(parent_value, str) and parent_value.strip():
+                cleaned = parent_value.strip()
+                if not _ISSUE_KEY_RE.match(cleaned):
+                    parent_summaries_to_lookup.add(cleaned)
+    parent_keys_by_summary: dict[str, str] = {}
+    if parent_summaries_to_lookup:
+        parent_keys_by_summary = client.find_issue_keys_by_summaries(
+            team_config.project_key,
+            list(parent_summaries_to_lookup),
+        )
 
     try:
         for result in preview.row_results:
@@ -366,12 +388,36 @@ def run_import(
                 "fields": dict(result.payload["fields"]),
             }
             source_row = source_rows_by_number.get(result.row_number, {})
-            for header in reporter_headers:
-                reporter_value = source_row.get(header)
-                if isinstance(reporter_value, str) and reporter_value.strip():
-                    account_id = client.find_user_account_id(reporter_value)
-                    if account_id:
-                        payload["fields"]["reporter"] = {"accountId": account_id}
+
+            for jira_field in ("reporter", "assignee"):
+                for header in deferred_headers[jira_field]:
+                    raw_value = source_row.get(header)
+                    if isinstance(raw_value, str) and raw_value.strip():
+                        account_id = client.find_user_account_id(raw_value)
+                        if account_id:
+                            payload["fields"][jira_field] = {"accountId": account_id}
+                        else:
+                            result.warnings.append(
+                                f"Row {result.row_number}: could not resolve {jira_field} "
+                                f"'{raw_value}' from column '{header}' to a Jira user"
+                            )
+                        break
+
+            for header in deferred_headers["parent"]:
+                parent_value = source_row.get(header)
+                if isinstance(parent_value, str) and parent_value.strip():
+                    cleaned = parent_value.strip()
+                    if _ISSUE_KEY_RE.match(cleaned):
+                        payload["fields"]["parent"] = {"key": cleaned}
+                    else:
+                        parent_key = parent_keys_by_summary.get(cleaned)
+                        if parent_key:
+                            payload["fields"]["parent"] = {"key": parent_key}
+                        else:
+                            result.warnings.append(
+                                f"Row {result.row_number}: could not resolve parent "
+                                f"'{cleaned}' from column '{header}' to a Jira issue key"
+                            )
                     break
 
             # ---- Create -----------------------------------------------------

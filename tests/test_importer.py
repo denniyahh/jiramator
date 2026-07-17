@@ -257,12 +257,12 @@ class TestBuildRowPayload:
         }
         assert result.warnings == ["Row 9: skipped unresolved column 'Component/s'"]
 
-    def test_assignee_scalar_is_skipped_with_warning(self):
+    def test_assignee_is_deferred_without_warning(self):
         from jiramator.importer import build_row_payload
 
         row = {
-            "Summary": "Risk - unsupported assignee",
-            "Assignee": "dennis@example.com",
+            "Summary": "Risk - deferred assignee",
+            "Assignee": "Dennis Kim",
         }
         jira_fields = [
             {"id": "assignee", "name": "Assignee"},
@@ -280,14 +280,13 @@ class TestBuildRowPayload:
         assert result.payload == {
             "fields": {
                 "project": {"key": "CA"},
-                "summary": "Risk - unsupported assignee",
+                "summary": "Risk - deferred assignee",
                 "issuetype": {"name": "Risk"},
                 "customfield_10273": [{"value": "No"}],
             }
         }
-        assert result.warnings == [
-            "Row 10: skipped unsupported assignee value for column 'Assignee'; expected a Jira user object"
-        ]
+        assert result.warnings == []
+        assert result.resolved_columns["Assignee"].jira_field == "assignee"
 
     def test_reporter_is_deferred_without_warning(self):
         from jiramator.importer import build_row_payload
@@ -418,6 +417,133 @@ class TestRunImport:
         payload = client.create_issue.call_args.args[0]
         assert payload["fields"]["reporter"] == {"accountId": "acct-456"}
         assert result.created == [(1, "Risk B", "CA-5002")]
+
+    def test_resolves_assignee_to_account_id_before_create(self):
+        from jiramator.importer import run_import
+
+        org = _org_config()
+        org.bulk_create.field_aliases["Assignee"] = "assignee"
+
+        rows = [{"Summary": "Risk A", "Assignee": "Heli Rawal"}]
+        client = MagicMock()
+        client.find_issue_keys_by_summaries.return_value = {}
+        client.find_user_account_id.return_value = "acct-789"
+        client.create_issue.return_value = "CA-5003"
+
+        result = run_import(
+            rows,
+            org_config=org,
+            team_config=_team_config(),
+            jira_fields=[],
+            client=client,
+        )
+
+        payload = client.create_issue.call_args.args[0]
+        assert payload["fields"]["assignee"] == {"accountId": "acct-789"}
+        assert result.created == [(1, "Risk A", "CA-5003")]
+
+    def test_unresolvable_assignee_warns_and_creates_without_it(self):
+        from jiramator.importer import run_import
+
+        org = _org_config()
+        org.bulk_create.field_aliases["Assignee"] = "assignee"
+
+        rows = [{"Summary": "Risk A", "Assignee": "Nobody Real"}]
+        client = MagicMock()
+        client.find_issue_keys_by_summaries.return_value = {}
+        client.find_user_account_id.return_value = None
+        client.create_issue.return_value = "CA-5004"
+
+        result = run_import(
+            rows,
+            org_config=org,
+            team_config=_team_config(),
+            jira_fields=[],
+            client=client,
+        )
+
+        payload = client.create_issue.call_args.args[0]
+        assert "assignee" not in payload["fields"]
+        assert result.created == [(1, "Risk A", "CA-5004")]
+
+    def test_resolves_parent_from_exact_jira_key(self):
+        from jiramator.importer import run_import
+
+        org = _org_config()
+        org.bulk_create.field_aliases["Parent"] = "parent"
+
+        rows = [{"Summary": "Risk A", "Parent": "CA-5079"}]
+        client = MagicMock()
+        client.find_issue_keys_by_summaries.return_value = {}
+        client.create_issue.return_value = "CA-5005"
+
+        result = run_import(
+            rows,
+            org_config=org,
+            team_config=_team_config(),
+            jira_fields=[],
+            client=client,
+        )
+
+        payload = client.create_issue.call_args.args[0]
+        assert payload["fields"]["parent"] == {"key": "CA-5079"}
+        # "CA-5079" is already a Jira key, so it should never be sent through
+        # the summary-lookup path (only the row-dedup call for "Risk A" itself).
+        for call in client.find_issue_keys_by_summaries.call_args_list:
+            assert "CA-5079" not in call.args[1]
+        assert result.created == [(1, "Risk A", "CA-5005")]
+
+    def test_resolves_parent_from_summary_lookup(self):
+        from jiramator.importer import run_import
+
+        org = _org_config()
+        org.bulk_create.field_aliases["Parent"] = "parent"
+
+        rows = [{"Summary": "Risk A", "Parent": "Miscellaneous Work"}]
+        client = MagicMock()
+
+        def _find_issue_keys(project_key, summaries):
+            if summaries == ["Miscellaneous Work"]:
+                return {"Miscellaneous Work": "CA-5079"}
+            return {}
+
+        client.find_issue_keys_by_summaries.side_effect = _find_issue_keys
+        client.create_issue.return_value = "CA-5006"
+
+        result = run_import(
+            rows,
+            org_config=org,
+            team_config=_team_config(),
+            jira_fields=[],
+            client=client,
+        )
+
+        payload = client.create_issue.call_args.args[0]
+        assert payload["fields"]["parent"] == {"key": "CA-5079"}
+        assert result.created == [(1, "Risk A", "CA-5006")]
+
+    def test_unresolvable_parent_warns_and_creates_without_it(self):
+        from jiramator.importer import run_import
+
+        org = _org_config()
+        org.bulk_create.field_aliases["Parent"] = "parent"
+
+        rows = [{"Summary": "Risk A", "Parent": "Nonexistent Epic"}]
+        client = MagicMock()
+        client.find_issue_keys_by_summaries.return_value = {}
+        client.create_issue.return_value = "CA-5007"
+
+        result = run_import(
+            rows,
+            org_config=org,
+            team_config=_team_config(),
+            jira_fields=[],
+            client=client,
+        )
+
+        payload = client.create_issue.call_args.args[0]
+        assert "parent" not in payload["fields"]
+        assert result.created == [(1, "Risk A", "CA-5007")]
 
     def test_dry_run_does_not_require_client(self):
         from jiramator.importer import run_import
