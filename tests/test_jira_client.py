@@ -9,6 +9,7 @@ import json
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import certifi
 import pytest
 import requests
 
@@ -129,10 +130,12 @@ class TestBuildHttpsAdapter:
     def test_ca_bundle_env_var_loads_custom_bundle(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
     ) -> None:
-        # Use the system CA bundle as a stand-in for a custom one — just
-        # verifying the path is actually threaded into the SSLContext.
+        # Use certifi's bundle as a stand-in for a custom one — just
+        # verifying the path is actually threaded into the SSLContext. This
+        # needs to be a real, existing bundle on every OS CI runs on
+        # (certifi.where() works on Linux/macOS/Windows alike).
         monkeypatch.delenv("JIRAMATOR_RELAX_TLS_STRICT", raising=False)
-        monkeypatch.setenv("JIRAMATOR_CA_BUNDLE", "/etc/ssl/certs/ca-certificates.crt")
+        monkeypatch.setenv("JIRAMATOR_CA_BUNDLE", certifi.where())
 
         from jiramator.jira_client import _build_https_adapter
 
