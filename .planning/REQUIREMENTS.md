@@ -1,69 +1,52 @@
-# Requirements: Jiramator — v1.3 Hardening & Reliability
+# Requirements: Jiramator — v1.2.9 Hardening
 
-**Defined:** 2026-09-29
+**Defined:** 2026-09-29 (re-scoped from the autonomous v1.3 draft after review with the user)
 **Core Value:** Bulk Jira writes must be correct and safe to re-run — never silently assign, create, or modify the wrong thing.
 
-> Scope chosen autonomously from `.planning/codebase/CONCERNS.md` + README future work
-> (user unavailable at init). Adjust before `/gsd-plan-phase 1` if direction differs.
+Hardening only — fixes and small safety additions, shipped as 1.2.x patch releases. Every
+requirement is backed by production evidence (work clone `.jiramator/runs/`) or a verified code
+defect. Feature work moved to v1.3 candidate seeds in `.planning/seeds/`.
 
-## v1 Requirements
+## v1.2.9 Requirements
+
+### Production Triage (INV)
+
+- [ ] **INV-01**: The root cause of the live `plan` failure on 2026-07-21 (work clone report `20260721T121841Z-calcs.json`, status `failed`, 0 created/failed) is identified and either fixed here or filed
+- [ ] **INV-02**: The root cause of `fixVersions: Version name 'Fix versions' is not valid` (2026-07-13 `plan`, dm-test) is identified as config or code, and fixed or documented
+- [ ] **INV-03**: Every `failed` run with 0 counts in the work clone's reports (2026-07-16, 07-17, 07-21) is classified: covered by HYG-04, config error, or a new defect
+
+### Import Preflight (PRE)
+
+- [ ] **PRE-01**: `import --dry-run` with credentials checks every row's payload against Jira's createmeta schema for its project and issue type, and lists each row's missing required fields before anything is written
+- [ ] **PRE-02**: The same preview reports select/option values Jira will reject, and plain-text values where Jira expects ADF
+- [ ] **PRE-03**: A live `import` runs the same check before creating anything and reports every failing row at once, instead of surfacing them one Jira 400 at a time
+- [ ] **PRE-04**: Without credentials or Jira access, `import --dry-run` still previews and states that schema validation was skipped (same degrade behaviour as `plan`)
 
 ### User Resolution (USER)
 
 - [ ] **USER-01**: When a reporter/assignee value matches exactly one user by display name (case-insensitive) or email, `import` assigns that user
-- [ ] **USER-02**: When a value matches no user exactly and Jira returns multiple fuzzy candidates, `import` skips the field for that row and prints a warning listing the candidates — it never assigns `users[0]`
+- [ ] **USER-02**: When a value matches no user exactly and Jira returns multiple fuzzy candidates, `import` skips the field for that row and warns, listing the candidates — it never assigns `users[0]`
 - [ ] **USER-03**: When Jira returns exactly one fuzzy (non-exact) candidate, `import` skips it with a warning (no silent auto-assign)
 - [ ] **USER-04**: `import --dry-run` preview reports ambiguous/unresolved user values when live lookup is available
-- [ ] **USER-05**: Unit tests lock in exact-match, ambiguous, single-fuzzy, and no-match behaviors of `find_user_account_id()`
+- [ ] **USER-05**: Unit tests lock in exact-match, ambiguous, single-fuzzy, and no-match behaviours of `find_user_account_id()`
 
-### Plan Re-run Safety (DEDUP)
+### Error & Config Hygiene (HYG)
 
-- [ ] **DEDUP-01**: Before creating, `plan` queries Jira for existing issues in the project whose summary exactly matches each ticket/epic to be created
-- [ ] **DEDUP-02**: The `plan` preview marks tickets that already exist in Jira (with their keys) and excludes them from creation by default
-- [ ] **DEDUP-03**: User can opt out of duplicate skipping via an explicit flag (e.g. `--allow-duplicates`)
-- [ ] **DEDUP-04**: Pre-existing recurring epics found by summary are reused as `$epic:` targets instead of being recreated
-- [ ] **DEDUP-05**: Duplicate detection degrades gracefully in `--dry-run` without credentials (preview notes the check was skipped)
-
-### Update Resume (RESUME)
-
-- [ ] **RESUME-01**: `update` writes a run report to `.jiramator/runs/` recording per-row success/failure
-- [ ] **RESUME-02**: User can run `update --resume` (auto-latest) or `update --resume <path>` to retry only failed/unprocessed rows
-- [ ] **RESUME-03**: `update --resume` refuses on input/config drift (resolved hash mismatch) unless `--force` is passed
-- [ ] **RESUME-04**: Existing `plan`/`import` run reports remain loadable (backward-compatible report schema)
-
-### Lookup Scalability (SCALE)
-
-- [ ] **SCALE-01**: `find_issue_keys_by_summaries()` chunks summaries into bounded JQL batches (≈100 per query)
-- [ ] **SCALE-02**: `find_issue_keys_by_summaries()` paginates `/rest/api/3/search/jql` via `nextPageToken` until exhausted
-- [ ] **SCALE-03**: An `import` with 500+ parent-by-summary rows resolves all matches (verified via mocked multi-page tests)
-
-### Config & Ops Hygiene (HYG)
-
-- [ ] **HYG-01**: `init` wizard prints a visible warning when it cannot detect the Epic Link field instead of silently writing `customfield_XXXXX`
+- [ ] **HYG-01**: `init` wizard prints a visible warning when it cannot detect the Epic Link field, instead of silently writing `customfield_XXXXX`
 - [ ] **HYG-02**: Loading an org config with a `custom_fields` value not matching `customfield_\d+` (or a known system field) fails with an actionable error
-- [ ] **HYG-03**: User can prune run reports older than N days via a CLI command/flag (e.g. `jiramator reports prune --older-than 30d`)
-- [ ] **HYG-04**: Pruning supports `--dry-run` listing files that would be deleted
-- [ ] **HYG-05**: `ConfigValidationError` propagates through `@contextmanager` / `ExitStack` / `try-except BaseException` scopes on Python 3.11–3.14 without `FrozenInstanceError`, keeping value equality on `(file, line, field_path, reason)` (carried over from v1.0 DEFER-02-01)
-- [ ] **HYG-06**: When `plan` fails to build tickets (e.g. a builder `ValueError` such as a missing `release_sprint_schedule` entry for the given release count), it prints the actionable message via the Rich console and exits 1 — never a Python traceback
+- [ ] **HYG-03**: `ConfigValidationError` propagates through `@contextmanager` / `ExitStack` / `try-except BaseException` scopes on Python 3.11–3.14 without `FrozenInstanceError`, keeping value equality on `(file, line, field_path, reason)` (v1.0 DEFER-02-01)
+- [ ] **HYG-04**: When `plan` fails to build tickets (e.g. a builder `ValueError` such as a missing `release_sprint_schedule` entry for the given release count), it prints the actionable message via the Rich console and exits 1 — never a Python traceback
 
-## v2 Requirements
+### Test Hygiene (TEST)
 
-Deferred. Tracked but not in current roadmap.
+- [ ] **TEST-01**: Running the test suite never writes run reports into the working tree's `.jiramator/runs/` (147 of 184 reports in the work clone came from pytest)
 
-### Live API Drift Detection
+## Future Requirements
 
-- **DRIFT-01**: Opt-in smoke-test suite that runs against a real Jira Cloud sandbox for createmeta, search/jql, bulk create
-- **DRIFT-02**: CI job (manual trigger) for the live smoke suite
-
-### Carried over from v1.0 (optional future work)
-
-- **CARRY-01**: `import` applies org `default_fields` (v1.0 Phase 2 deliberately scoped this to `plan` only)
-- **CARRY-02**: Sub-task support in `plan` templates
-- **CARRY-03**: Config diff command (v1.0 CONF-02)
-
-### Cleanup
-
-- **CLEAN-01**: Remove unused `__version__` from `jiramator/__init__.py`
+Deferred to v1.3 candidates — see `.planning/seeds/` (surface at `/gsd-new-milestone`):
+`plan` duplicate detection, `update` run reports + `--resume`, summary-lookup chunking/pagination,
+run-report pruning, `import` org `default_fields`, sub-task support, config diff, live-Jira drift
+smoke suite, dead `__version__` removal.
 
 ## Out of Scope
 
@@ -74,42 +57,35 @@ Deferred. Tracked but not in current roadmap.
 | Credential rotation mid-run | No long-running daemon usage |
 | Batched epic creation | Handful of epics per PI; not a bottleneck |
 | Automatic rollback of partial bulk creates | Resume mechanism is the chosen mitigation |
+| New features of any kind | v1.2.9 is hardening only; features are v1.3 candidates |
 
 ## Traceability
 
-Which phases cover which requirements. Updated during roadmap creation.
-
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| USER-01 | Phase 1 | Pending |
-| USER-02 | Phase 1 | Pending |
-| USER-03 | Phase 1 | Pending |
-| USER-04 | Phase 1 | Pending |
-| USER-05 | Phase 1 | Pending |
-| SCALE-01 | Phase 2 | Pending |
-| SCALE-02 | Phase 2 | Pending |
-| SCALE-03 | Phase 2 | Pending |
-| DEDUP-01 | Phase 2 | Pending |
-| DEDUP-02 | Phase 2 | Pending |
-| DEDUP-03 | Phase 2 | Pending |
-| DEDUP-04 | Phase 2 | Pending |
-| DEDUP-05 | Phase 2 | Pending |
-| RESUME-01 | Phase 3 | Pending |
-| RESUME-02 | Phase 3 | Pending |
-| RESUME-03 | Phase 3 | Pending |
-| RESUME-04 | Phase 3 | Pending |
+| INV-01 | Phase 1 | Pending |
+| INV-02 | Phase 1 | Pending |
+| INV-03 | Phase 1 | Pending |
+| PRE-01 | Phase 2 | Pending |
+| PRE-02 | Phase 2 | Pending |
+| PRE-03 | Phase 2 | Pending |
+| PRE-04 | Phase 2 | Pending |
+| USER-01 | Phase 3 | Pending |
+| USER-02 | Phase 3 | Pending |
+| USER-03 | Phase 3 | Pending |
+| USER-04 | Phase 3 | Pending |
+| USER-05 | Phase 3 | Pending |
 | HYG-01 | Phase 4 | Pending |
 | HYG-02 | Phase 4 | Pending |
 | HYG-03 | Phase 4 | Pending |
 | HYG-04 | Phase 4 | Pending |
-| HYG-05 | Phase 4 | Pending |
-| HYG-06 | Phase 4 | Pending |
+| TEST-01 | Phase 4 | Pending |
 
 **Coverage:**
-- v1 requirements: 23 total
-- Mapped to phases: 23
-- Unmapped: 0 ✓
+- v1.2.9 requirements: 17 total
+- Mapped to phases: 17
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-09-29*
-*Last updated: 2026-09-29 after roadmap creation*
+*Last updated: 2026-09-29 after re-scoping v1.3 → v1.2.9 Hardening*

@@ -2,16 +2,18 @@
 
 ## Milestones
 
-- 🚧 **v1.3 Hardening & Reliability** - Phases 1-4 (in progress)
+- ✅ **v1.0 Feature Extensions** - Phases 1-3 (shipped 2026-07-10; archived in `milestones/v1.0-*`)
+- 🚧 **v1.2.9 Hardening** - Phases 1-4 (in progress)
 
 ## Overview
 
-v1.2.8 is shipped and in active use. v1.3 hardens the three places where a bulk Jira write can
-silently go wrong or be impossible to safely retry. First, user lookups stop guessing. Second,
-summary search scales and `plan` becomes safe to re-run without duplicates. Third, `update` gains
-the same run-report/resume safety net as `plan`/`import`. The milestone closes with config and
-ops hygiene: no silent placeholder field IDs, and a way to prune old run reports. Every phase
-serves the Core Value: bulk writes must be correct and safe to re-run.
+v1.2.8 is shipped and in production use. v1.2.9 hardens the paths where production runs have
+actually failed or could silently go wrong, shipped as 1.2.x patch releases. It starts by triaging
+the unexplained failures in the work clone's run reports, since findings may reshape later
+phases. Then `import` gains the same pre-write schema validation `plan` already has — the
+highest-value fix, given the 2026-09-02 Risk import needed four attempts. User lookups stop
+guessing. The milestone closes with small error/config hygiene fixes and isolating tests from
+the real run-report directory. Feature work is parked as v1.3 candidate seeds.
 
 ## Phases
 
@@ -21,58 +23,55 @@ serves the Core Value: bulk writes must be correct and safe to re-run.
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Safe User Resolution** - `import` never assigns a reporter/assignee from an ambiguous or fuzzy user match
-- [ ] **Phase 2: Scalable Lookup & Plan Re-run Safety** - Chunked/paginated summary search, then `plan` detects and skips issues that already exist
-- [ ] **Phase 3: Update Run Reports & Resume** - `update` records per-row results and can resume failed rows with a drift check
-- [ ] **Phase 4: Config & Ops Hygiene** - No silent placeholder field IDs; old run reports can be pruned
+- [ ] **Phase 1: Production Triage** - Root-cause the unexplained `plan` failures in production run reports
+- [ ] **Phase 2: Import Preflight Validation** - `import` validates every row against Jira's createmeta schema before writing
+- [ ] **Phase 3: Safe User Resolution** - `import` never assigns a reporter/assignee from an ambiguous or fuzzy user match
+- [ ] **Phase 4: Error, Config & Test Hygiene** - Clean errors instead of tracebacks, validated field IDs, tests isolated from real run reports
 
 ## Phase Details
 
-### Phase 1: Safe User Resolution
+### Phase 1: Production Triage
+**Goal**: Every unexplained production failure in the work clone's run reports has a known root cause, and each is either fixed, folded into a later phase, or filed
+**Depends on**: Nothing (first phase; findings may add requirements to Phases 2–4)
+**Requirements**: INV-01, INV-02, INV-03
+**Success Criteria** (what must be TRUE):
+  1. The 2026-07-21 live `plan` failure (`20260721T121841Z-calcs.json`) has a written root cause, reproduced or explained from the report and code
+  2. The `Version name 'Fix versions' is not valid` error is attributed to config or code; if code, it is fixed with a regression test
+  3. Each zero-count `failed` report from 2026-07-16/17/21 is classified (HYG-04 traceback, config error, or new defect) and any new defect has a requirement or issue
+**Plans**: TBD
+
+### Phase 2: Import Preflight Validation
+**Goal**: A user sees every row `import` would fail on — missing required fields, rejected option values, non-ADF rich text — before anything is written to Jira
+**Depends on**: Phase 1 (triage may surface related import defects)
+**Requirements**: PRE-01, PRE-02, PRE-03, PRE-04
+**Success Criteria** (what must be TRUE):
+  1. Replaying the 2026-09-02 Risk import shape with `--dry-run` lists the missing `Fix versions` and `Repositories` fields per row, with no Jira writes
+  2. Invalid select values and plain-text-for-ADF values are reported in the same preview
+  3. A live `import` reports all failing rows up front instead of discovering them one 400 at a time
+  4. Without credentials, `import --dry-run` still previews and says schema validation was skipped
+**Plans**: TBD
+
+### Phase 3: Safe User Resolution
 **Goal**: Reporter/assignee values in `import` resolve to a user only when the match is unambiguous; every other case is skipped with a visible warning
-**Depends on**: Nothing (first phase)
+**Depends on**: Phase 2 (ambiguous-user warnings appear in the same preflight preview)
 **Requirements**: USER-01, USER-02, USER-03, USER-04, USER-05
 **Success Criteria** (what must be TRUE):
-  1. A spreadsheet row whose reporter/assignee exactly matches one user's display name (case-insensitive) or email is created with that user assigned
-  2. A row whose value matches several fuzzy candidates, or exactly one non-exact candidate, is created with that field left unset, and the console warning names the row, the value, and the candidates Jira returned
-  3. `import --dry-run` with live credentials lists every ambiguous or unresolved user value before anything is written
-  4. The test suite has one test each for exact-match, ambiguous, single-fuzzy, and no-match `find_user_account_id()` outcomes, and none of them resolve to `users[0]`
+  1. An exact display-name (case-insensitive) or email match to one user assigns that user
+  2. Multiple fuzzy candidates, or one non-exact candidate: the field is left unset and a warning lists row, value and candidates
+  3. `import --dry-run` with credentials lists ambiguous/unresolved user values before any write
+  4. Tests cover exact, ambiguous, single-fuzzy and no-match cases; none resolve to `users[0]`
 **Plans**: TBD
 
-### Phase 2: Scalable Lookup & Plan Re-run Safety
-**Goal**: Summary-based lookups return complete results at any import size, and `plan` can be re-run for the same PI without creating duplicate epics or tickets
-**Depends on**: Nothing (independent of Phase 1); SCALE work comes first inside this phase because DEDUP reuses the same summary search
-**Requirements**: SCALE-01, SCALE-02, SCALE-03, DEDUP-01, DEDUP-02, DEDUP-03, DEDUP-04, DEDUP-05
+### Phase 4: Error, Config & Test Hygiene
+**Goal**: Misconfiguration and build errors fail loudly and cleanly, and the test suite never pollutes real run reports
+**Depends on**: Phase 1 (triage may attribute failures to HYG-04)
+**Requirements**: HYG-01, HYG-02, HYG-03, HYG-04, TEST-01
 **Success Criteria** (what must be TRUE):
-  1. An `import` with 500+ parent-by-summary rows resolves every matching parent. Mocked tests prove queries are chunked (≈100 summaries each) and follow `nextPageToken` until the results are exhausted
-  2. Re-running `plan` for a PI that was already created shows existing epics/tickets as "already exists (KEY-123)" in the preview and creates none of them
-  3. With `--allow-duplicates` (or equivalent flag), `plan` creates every ticket regardless of existing matches
-  4. When a recurring epic already exists in Jira by summary, tickets referencing it via `$epic:` are linked to the existing epic key instead of a newly created epic
-  5. `plan --dry-run` without credentials still renders a full preview and clearly states that the duplicate check was skipped
-**Plans**: TBD
-
-### Phase 3: Update Run Reports & Resume
-**Goal**: A partially failed `update` can be safely retried for only the rows that didn't succeed, with the same safety guarantees as `plan`/`import`
-**Depends on**: Nothing (mirrors the existing `run_report.py` / `cli.py` pattern used by `plan`/`import`)
-**Requirements**: RESUME-01, RESUME-02, RESUME-03, RESUME-04
-**Success Criteria** (what must be TRUE):
-  1. After a live `update`, a report in `.jiramator/runs/` records success or failure (with the error) for each row
-  2. `update --resume` (latest report) or `update --resume <path>` re-processes only failed/unprocessed rows and leaves already-updated issues untouched
-  3. `update --resume` refuses to run when the input spreadsheet or resolved config changed since the original run, and proceeds only with `--force`
-  4. Run reports written by v1.2.8 `plan`/`import` still load and resume without errors
-**Plans**: TBD
-
-### Phase 4: Config & Ops Hygiene
-**Goal**: Misconfigured custom field IDs fail loudly and early, and users can clean up accumulated run reports
-**Depends on**: Phase 3 (pruning covers the `update` reports introduced/formalized there)
-**Requirements**: HYG-01, HYG-02, HYG-03, HYG-04, HYG-05, HYG-06
-**Success Criteria** (what must be TRUE):
-  1. When `init` cannot detect the Epic Link field, the wizard prints a visible warning telling the user to fill in the real field ID, and it never silently writes `customfield_XXXXX`
-  2. Loading an org config whose `custom_fields` value is neither `customfield_<digits>` nor a known system field fails immediately with an error naming the key, the bad value, and the expected format
-  3. `jiramator reports prune --older-than 30d` (or equivalent) deletes run reports older than the threshold and leaves newer ones in place
-  4. Adding `--dry-run` to the prune command lists the files it would delete without deleting anything
-  5. A `ConfigValidationError` raised inside a `@contextmanager`/`ExitStack` scope surfaces as itself (not `FrozenInstanceError`) on every supported Python, and two errors with equal fields still compare equal — locked by a regression test
-  6. `plan --dry-run` with a release count missing from `release_sprint_schedule` prints the builder's actionable error and exits 1 with no traceback
+  1. When `init` cannot detect the Epic Link field it prints a visible warning and never silently writes `customfield_XXXXX`
+  2. An invalid `custom_fields` value fails config loading with an error naming the key, the value and the expected format
+  3. A `ConfigValidationError` raised inside a `@contextmanager`/`ExitStack` scope surfaces as itself on every supported Python, and equal errors still compare equal — locked by a regression test
+  4. `plan --dry-run` with a release count missing from `release_sprint_schedule` prints the builder's actionable error and exits 1 with no traceback
+  5. A full `pytest` run leaves the working tree's `.jiramator/runs/` unchanged
 **Plans**: TBD
 
 ## Progress
@@ -82,7 +81,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Safe User Resolution | 0/TBD | Not started | - |
-| 2. Scalable Lookup & Plan Re-run Safety | 0/TBD | Not started | - |
-| 3. Update Run Reports & Resume | 0/TBD | Not started | - |
-| 4. Config & Ops Hygiene | 0/TBD | Not started | - |
+| 1. Production Triage | 0/TBD | Not started | - |
+| 2. Import Preflight Validation | 0/TBD | Not started | - |
+| 3. Safe User Resolution | 0/TBD | Not started | - |
+| 4. Error, Config & Test Hygiene | 0/TBD | Not started | - |

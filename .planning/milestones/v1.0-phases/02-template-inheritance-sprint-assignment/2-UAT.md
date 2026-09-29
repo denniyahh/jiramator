@@ -61,4 +61,4 @@ blocked: 0
 
 None in Phase 2 scope. Incidental finding during setup: a builder `ValueError` (e.g. missing
 `release_sprint_schedule` entry for the given release count) escapes `plan` as a raw traceback
-instead of a clean CLI error — tracked as v1.3 HYG-06.
+instead of a clean CLI error — tracked as v1.2.9 HYG-04.

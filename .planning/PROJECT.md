@@ -37,16 +37,15 @@ contract users rely on.
 
 ### Active
 
-<!-- Milestone: v1.3 Hardening & Reliability. Hypotheses until shipped. -->
+<!-- Milestone: v1.2.9 Hardening (1.2.x patch releases). Hypotheses until shipped. -->
 
+- [ ] Unexplained production `plan` failures are root-caused
+- [ ] `import` validates every row against Jira's schema before writing (as `plan` does)
 - [ ] User lookups never silently pick the wrong person on ambiguous names
-- [ ] `plan` can be re-run without creating duplicate epics/tickets
-- [ ] `update` supports run reports and `--resume` like `plan`/`import`
-- [ ] Summary-based parent lookup scales to large imports (chunking + pagination)
-- [ ] `init` wizard never writes a silent placeholder custom field ID
-- [ ] Old run reports can be pruned
-- [ ] Config validation errors survive context-manager unwinding on Python 3.14 (v1.0 DEFER-02-01)
-- [ ] `plan` build errors never surface as a raw traceback
+- [ ] Build/config errors surface as clean messages, never tracebacks or silent placeholders
+- [ ] The test suite never writes into the real run-report directory
+
+v1.3 candidates (features) are parked as seeds in `.planning/seeds/`.
 
 ### Out of Scope
 
@@ -74,9 +73,8 @@ contract users rely on.
 - `find_issue_keys_by_summaries()` builds one unbounded OR'd JQL with `maxResults=len(...)`
   and no pagination.
 - `wizard.py:156` falls back to `customfield_XXXXX`.
-- **Milestone direction chosen autonomously** (user unavailable during `/gsd-new-project`),
-  grounded in `.planning/codebase/CONCERNS.md` and README future work. Revisit if the user
-  intends a different direction.
+- Milestone scope was first drafted autonomously (user unavailable at init), then reviewed and
+  re-framed with the user as v1.2.9 Hardening against production run-report evidence.
 
 ## Constraints
 
@@ -91,7 +89,7 @@ contract users rely on.
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Milestone v1.3 = Hardening & Reliability | Only documented open work; aligns with Core Value (correct & safe to re-run) | — Pending |
+| Hardening milestone = v1.2.9 (patch releases), features deferred to v1.3 seeds | Autonomous v1.3 draft reviewed with user: evidence-backed fixes only; v1.2.5 was taken by an existing tag | ✓ Good |
 | Ambiguous user match → skip + warn (not first result) | Mirrors existing "could not resolve" UX; wrong assignment is worse than none | — Pending |
 | `.planning/` stays local (gitignored, `commit_docs: false`) | Personal workflow state never committed to shared branches | ✓ Good |
 | Each phase runs in its own worktree: `wsx new gsd/phase-NN-<slug>` off `develop`, merged back `--no-ff` per phase; GSD `branching_strategy: none` inside it, `git.base_branch: develop`, `workflow.use_worktrees: true` for executor isolation | Global rule: never commit to integration branches, all dev in dedicated worktrees. GSD's `phase` strategy would `git switch` in the current worktree and fork from `origin/HEAD` (`main`) | ✓ Good |
@@ -115,4 +113,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-09-29 after initialization*
+*Last updated: 2026-09-29 after re-scoping to v1.2.9 Hardening*

@@ -16,14 +16,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-29)
 
 **Core value:** Bulk Jira writes must be correct and safe to re-run — never silently assign, create, or modify the wrong thing.
-**Current focus:** Phase 1: Safe User Resolution
+**Current focus:** Phase 1: Production Triage (milestone v1.2.9 Hardening)
 
 ## Current Position
 
-Phase: 1 of 4 (Safe User Resolution)
+Phase: 1 of 4 (Production Triage)
 Plan: 0 of TBD in current phase
 Status: Ready to plan
-Last activity: 2026-09-29 — Added HYG-05 (v1.0 DEFER-02-01) and HYG-06 (plan traceback, found in v1.0 UAT); 23/23 mapped; v1.0 Phase 2 UAT closed 7/7
+Last activity: 2026-09-29 — Re-scoped v1.3 draft to v1.2.9 Hardening with the user (17 reqs, 4 phases); feature items planted as v1.3 seeds
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -53,9 +53,10 @@ Progress: [░░░░░░░░░░] 0%
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
-- [Init]: Milestone v1.3 direction chosen autonomously from CONCERNS.md (user unavailable) — revisit if user intends otherwise
+- [Scope]: v1.3 draft (autonomously scoped at init) reviewed with user and re-framed as v1.2.9 Hardening — evidence-backed items only; features → `.planning/seeds/` as v1.3 candidates
+- [Scope]: Milestone numbered v1.2.9, not v1.2.5 as first suggested — v1.2.5 is an existing release tag (2026-07-17) and `git.create_tag` is on
 - [Init]: Ambiguous user match → skip + warn, never `users[0]`
-- [Roadmap]: SCALE combined with DEDUP in Phase 2 (DEDUP reuses the chunked/paginated summary search)
+- [Roadmap]: Production triage first — findings may add requirements to later phases
 
 ### Pending Todos
 
@@ -63,9 +64,9 @@ None yet.
 
 ### Blockers/Concerns
 
-- [Phase 2/3]: Changes to `jira_client.py` (search/jql pagination, summary search) should be smoke-tested against live Jira — mocks missed the 1.2.6 API-shape bugs
-- [Phase 2]: `summary ~` JQL is a text match; exact-summary filtering must happen client-side to satisfy DEDUP-01
-- [Phase 3]: CONCERNS.md says `update` already writes a report to `.jiramator/runs/` — verify the current state during planning; RESUME-01 may be partially met
+- [Phase 1]: Triage needs the work clone's run reports (`~/dev/work_projects/jiramator/.jiramator/runs/`) and possibly its gitignored real configs — read-only; do not modify the production clone
+- [Phase 2]: Reuse `payload_validator.validate_ticket_payload()` + `get_createmeta_fields_by_type_name()` from `plan`'s `_preflight_validate`; smoke-test against live Jira (mocks missed the 1.2.6 createmeta bugs)
+- [Phase 2]: Decide in discuss-phase whether a live `import` with failing rows aborts entirely or creates the valid rows
 
 ## Deferred Items
 
@@ -78,5 +79,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-09-29 09:31
-Stopped at: Roadmap and STATE initialized; ready for `/gsd-plan-phase 1`
+Stopped at: v1.2.9 roadmap approved; ready for `wsx new gsd/phase-01-production-triage` then `/gsd-discuss-phase 1`
 Resume file: None

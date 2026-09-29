@@ -12,6 +12,6 @@
 Archive: `milestones/v1.0-ROADMAP.md`, `v1.0-REQUIREMENTS.md`, `v1.0-PROJECT.md`, `v1.0-STATE.md`,
 `v1.0-phases/`, `v1.0-research/`. Imported 2026-09-29 from the work clone.
 
-## v1.3 — Hardening & Reliability (active)
+## v1.2.9 — Hardening (active)
 
-See `ROADMAP.md`.
+See `ROADMAP.md`. Patch releases 1.2.9+. Feature candidates for v1.3 are in `seeds/`.
