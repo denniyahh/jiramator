@@ -1,0 +1,8 @@
+# Personal toolchain for jiramator (tracked on personal-workspace only; synced by wsx).
+# Pinned to the newest Python CI tests against (3.11–3.13). mise creates and
+# auto-activates ./.venv on cd; bootstrap with: pip install -e ".[dev]"
+[tools]
+python = "3.13"
+
+[env]
+_.python.venv = { path = ".venv", create = true }

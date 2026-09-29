@@ -61,7 +61,7 @@ Deferred. Tracked but not in current roadmap.
 
 | Feature | Reason |
 |---------|--------|
-| Non-interactive `plan --yes` | `plan` is a human-driven once-per-PI ritual |
+| MCP server / REST API | Declined in v1.0 — superseded by `init` wizard + non-interactive CLI |
 | Generic deferred-field hook refactor | Over-engineering for three deferred fields |
 | Credential rotation mid-run | No long-running daemon usage |
 | Batched epic creation | Handful of epics per PI; not a bottleneck |

@@ -29,7 +29,9 @@ contract users rely on.
 - ✓ `import`: deferred live resolution of reporter/assignee (user search), parent (key/summary), sprint (name→ID) — existing
 - ✓ `update`: CSV/XLSX bulk edit with value coercion and `value_aliases` — existing
 - ✓ Run reports in `.jiramator/runs/` with `--resume` / `--resume --force` drift check for `plan` and `import` — existing
-- ✓ `init` interactive setup wizard for org/team config — existing
+- ✓ `plan` non-interactive mode (`--pi-number`/`--versions`/`--yes`) — v1.0 (FOUND-05/INTG-02)
+- ✓ Template inheritance: org `default_fields` → team `defaults` → template `fields` — v1.0
+- ✓ `init` interactive setup wizard for org/team config — v1.0 (CONF-01)
 - ✓ Corporate TLS interception support (`JIRAMATOR_CA_BUNDLE`, `JIRAMATOR_RELAX_TLS_STRICT`) — existing
 - ✓ CI on Linux/macOS/Windows × Python 3.11–3.13; 653 tests passing — existing
 
@@ -46,7 +48,7 @@ contract users rely on.
 
 ### Out of Scope
 
-- `--yes` / non-interactive `plan` — `plan` is a human-driven once-per-PI ritual (ISSUES.md discarded items)
+- MCP server / REST API entry point — reviewed and declined in v1.0; superseded by `init` wizard + non-interactive CLI
 - Generic deferred-field resolution hook refactor — over-engineering for three fields (ISSUES.md)
 - Credential rotation / long-running daemon mode — not a current usage pattern (CONCERNS.md)
 - Batching epic creation — only a handful of epics per PI; not a bottleneck
@@ -54,6 +56,10 @@ contract users rely on.
 
 ## Context
 
+- Prior GSD milestone **v1.0** (Reliability, Template Inheritance, Accessibility — 3 phases,
+  8 plans, complete) is archived in `.planning/milestones/v1.0-*`, imported from the work
+  clone (`~/dev/work_projects/jiramator`). This personal clone is the primary dev repo; the
+  work clone is the production/corporate-sharing copy.
 - Brownfield: v1.2.8, codebase map in `.planning/codebase/` (mapped 2026-09-28 at `8c96e59`).
 - Five-layer architecture (CLI / Config / Builder / Client / Planner) plus parallel
   `importer`/`updater` path via `field_resolver` + `value_coercion`.
