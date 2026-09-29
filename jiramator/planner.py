@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -745,7 +745,7 @@ def run_plan(
     # -- Step 3: Initialize and persist the run report ---------------------
     report = RunReport(
         command=list(command) if command else [],
-        started_at=datetime.now(timezone.utc).isoformat(),
+        started_at=datetime.now(UTC).isoformat(),
         team_config_path=str(team_config_path.resolve()) if team_config_path else "",
         org_config_path=str(org_config_path.resolve()) if org_config_path else "",
         team_name=team_config.team_name,
@@ -865,7 +865,7 @@ def _run_plan_inner(
 
         console.print("\n[yellow]── Dry run ── no tickets created.[/]")
         report.status = "success"
-        report.ended_at = datetime.now(timezone.utc).isoformat()
+        report.ended_at = datetime.now(UTC).isoformat()
         persist()
         return
 
@@ -1006,7 +1006,7 @@ def _run_plan_inner(
     )
 
     # -- Step 13: Final status flip + persist -------------------------------
-    report.ended_at = datetime.now(timezone.utc).isoformat()
+    report.ended_at = datetime.now(UTC).isoformat()
     if report.counts.get("failed", 0) == 0 and report.counts.get("created", 0) > 0:
         report.status = "success"
     elif report.counts.get("created", 0) > 0:
@@ -1083,7 +1083,7 @@ def _bulk_create_with_resume(
         console.print("[yellow]Some tickets may have been created. Check Jira.[/]")
         sys.exit(1)
 
-    for tk, jira_key in zip(template_keys_in_order, keys):
+    for tk, jira_key in zip(template_keys_in_order, keys, strict=False):
         report.issues.append(
             IssueResult(
                 template_key=tk, kind=kind,  # type: ignore[arg-type]

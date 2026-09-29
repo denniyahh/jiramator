@@ -52,7 +52,7 @@ class TestImportCommand:
         fake_report.row_results = []
 
         monkeypatch.setattr("jiramator.cli.read_spreadsheet", lambda *args, **kwargs: [{"Summary": "Risk A", "API Impact": "No"}])
-        monkeypatch.setattr("jiramator.cli.build_preview_report", lambda *args, **kwargs: fake_report)
+        monkeypatch.setattr("jiramator.importer.build_preview_report", lambda *args, **kwargs: fake_report)
         monkeypatch.setattr("jiramator.cli.render_preview_report", lambda *args, **kwargs: "PREVIEW REPORT")
 
         mock_client = MagicMock()
@@ -97,7 +97,7 @@ class TestImportCommand:
         fake_report.row_results = []
 
         monkeypatch.setattr("jiramator.cli.read_spreadsheet", lambda *args, **kwargs: [{"Summary": "Risk A", "API Impact": "No"}])
-        monkeypatch.setattr("jiramator.cli.build_preview_report", lambda *args, **kwargs: fake_report)
+        monkeypatch.setattr("jiramator.importer.build_preview_report", lambda *args, **kwargs: fake_report)
         monkeypatch.setattr("jiramator.cli.render_preview_report", lambda *args, **kwargs: "PREVIEW REPORT")
         monkeypatch.setattr(
             "jiramator.cli.JiraClient",
@@ -139,7 +139,7 @@ class TestImportCommand:
         fake_report.row_results = []
 
         monkeypatch.setattr("jiramator.cli.read_spreadsheet", lambda *args, **kwargs: [{"Summary": "Risk A", "API Impact": "No"}])
-        monkeypatch.setattr("jiramator.cli.build_preview_report", lambda *args, **kwargs: fake_report)
+        monkeypatch.setattr("jiramator.importer.build_preview_report", lambda *args, **kwargs: fake_report)
         monkeypatch.setattr("jiramator.cli.render_preview_report", lambda *args, **kwargs: "PREVIEW REPORT")
 
         mock_client = MagicMock()
@@ -209,7 +209,7 @@ class TestImportCommand:
         preview_report = MagicMock(total_rows=2, successful_rows=2, failed_rows=0, row_results=row_results)
 
         monkeypatch.setattr("jiramator.cli.read_spreadsheet", lambda *args, **kwargs: rows)
-        monkeypatch.setattr("jiramator.cli.build_preview_report", lambda *args, **kwargs: preview_report)
+        monkeypatch.setattr("jiramator.importer.build_preview_report", lambda *args, **kwargs: preview_report)
         monkeypatch.setattr("jiramator.cli.render_preview_report", lambda *args, **kwargs: "PREVIEW REPORT")
 
         client = MagicMock()

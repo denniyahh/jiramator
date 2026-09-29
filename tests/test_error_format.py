@@ -5,7 +5,7 @@ Plan: 01-01 Task 2.
 
 from __future__ import annotations
 
-from pathlib import Path
+import dataclasses
 
 import pytest
 
@@ -15,7 +15,6 @@ from jiramator.error_format import (
     did_you_mean,
     format_loc,
 )
-
 
 # ---------------------------------------------------------------------------
 # ConfigValidationError.__str__
@@ -122,7 +121,7 @@ def test_is_exception_subclass_and_frozen(tmp_path):
     with pytest.raises(ConfigValidationError):
         raise err
     # Must be immutable post-construction
-    with pytest.raises(Exception):
+    with pytest.raises(dataclasses.FrozenInstanceError):
         err.line = 99  # type: ignore[misc]
 
 
@@ -156,7 +155,7 @@ def test_propagates_through_click_command_without_crashing(tmp_path):
 
     # Declared fields must still be genuinely immutable after the fix.
     err = ConfigValidationError(file=target, line=1, field_path="<root>", reason="bad")
-    with pytest.raises(Exception):
+    with pytest.raises(dataclasses.FrozenInstanceError):
         err.reason = "mutated"  # type: ignore[misc]
 
 
@@ -296,7 +295,7 @@ class TestConfigConflictWarning:
             field_path="x",
             earlier_layer="team defaults",
         )
-        with pytest.raises(Exception):
+        with pytest.raises(dataclasses.FrozenInstanceError):
             w.field_path = "y"  # type: ignore[misc]
 
     def test_w5_not_an_exception_subclass(self, tmp_path):
