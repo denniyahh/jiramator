@@ -45,6 +45,7 @@ contract users rely on.
 - [ ] Summary-based parent lookup scales to large imports (chunking + pagination)
 - [ ] `init` wizard never writes a silent placeholder custom field ID
 - [ ] Old run reports can be pruned
+- [ ] Config validation errors survive context-manager unwinding on Python 3.14 (v1.0 DEFER-02-01)
 
 ### Out of Scope
 

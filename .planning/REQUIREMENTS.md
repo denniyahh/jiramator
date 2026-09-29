@@ -43,6 +43,7 @@
 - [ ] **HYG-02**: Loading an org config with a `custom_fields` value not matching `customfield_\d+` (or a known system field) fails with an actionable error
 - [ ] **HYG-03**: User can prune run reports older than N days via a CLI command/flag (e.g. `jiramator reports prune --older-than 30d`)
 - [ ] **HYG-04**: Pruning supports `--dry-run` listing files that would be deleted
+- [ ] **HYG-05**: `ConfigValidationError` propagates through `@contextmanager` / `ExitStack` / `try-except BaseException` scopes on Python 3.11–3.14 without `FrozenInstanceError`, keeping value equality on `(file, line, field_path, reason)` (carried over from v1.0 DEFER-02-01)
 
 ## v2 Requirements
 
@@ -52,6 +53,12 @@ Deferred. Tracked but not in current roadmap.
 
 - **DRIFT-01**: Opt-in smoke-test suite that runs against a real Jira Cloud sandbox for createmeta, search/jql, bulk create
 - **DRIFT-02**: CI job (manual trigger) for the live smoke suite
+
+### Carried over from v1.0 (optional future work)
+
+- **CARRY-01**: `import` applies org `default_fields` (v1.0 Phase 2 deliberately scoped this to `plan` only)
+- **CARRY-02**: Sub-task support in `plan` templates
+- **CARRY-03**: Config diff command (v1.0 CONF-02)
 
 ### Cleanup
 
@@ -94,10 +101,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | HYG-02 | Phase 4 | Pending |
 | HYG-03 | Phase 4 | Pending |
 | HYG-04 | Phase 4 | Pending |
+| HYG-05 | Phase 4 | Pending |
 
 **Coverage:**
-- v1 requirements: 21 total
-- Mapped to phases: 21
+- v1 requirements: 22 total
+- Mapped to phases: 22
 - Unmapped: 0 ✓
 
 ---

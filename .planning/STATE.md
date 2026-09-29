@@ -23,7 +23,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 Phase: 1 of 4 (Safe User Resolution)
 Plan: 0 of TBD in current phase
 Status: Ready to plan
-Last activity: 2026-09-29 — Roadmap created for milestone v1.3 Hardening & Reliability (4 phases, 21/21 requirements mapped)
+Last activity: 2026-09-29 — Added HYG-05 (v1.0 DEFER-02-01 carry-over); 22/22 requirements mapped
 
 Progress: [░░░░░░░░░░] 0%
 

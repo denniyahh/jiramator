@@ -65,12 +65,13 @@ Decimal phases appear between their surrounding integers in numeric order.
 ### Phase 4: Config & Ops Hygiene
 **Goal**: Misconfigured custom field IDs fail loudly and early, and users can clean up accumulated run reports
 **Depends on**: Phase 3 (pruning covers the `update` reports introduced/formalized there)
-**Requirements**: HYG-01, HYG-02, HYG-03, HYG-04
+**Requirements**: HYG-01, HYG-02, HYG-03, HYG-04, HYG-05
 **Success Criteria** (what must be TRUE):
   1. When `init` cannot detect the Epic Link field, the wizard prints a visible warning telling the user to fill in the real field ID, and it never silently writes `customfield_XXXXX`
   2. Loading an org config whose `custom_fields` value is neither `customfield_<digits>` nor a known system field fails immediately with an error naming the key, the bad value, and the expected format
   3. `jiramator reports prune --older-than 30d` (or equivalent) deletes run reports older than the threshold and leaves newer ones in place
   4. Adding `--dry-run` to the prune command lists the files it would delete without deleting anything
+  5. A `ConfigValidationError` raised inside a `@contextmanager`/`ExitStack` scope surfaces as itself (not `FrozenInstanceError`) on every supported Python, and two errors with equal fields still compare equal — locked by a regression test
 **Plans**: TBD
 
 ## Progress
