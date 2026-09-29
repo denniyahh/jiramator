@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "hooks": {
+    "postToolUse": [
+      {
+        "type": "command",
+        "bash": "bash \"$(git rev-parse --show-toplevel)/.github/hooks/post-edit-lint.sh\"",
+        "timeoutSec": 30
+      }
+    ]
+  }
+}
