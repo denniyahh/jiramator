@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 
 from jiramator.config import load_org_config, load_team_config
-from jiramator.ticket_builder import build_all, build_epics
+from jiramator.ticket_builder import build_all
 
 # ---------------------------------------------------------------------------
 # Paths

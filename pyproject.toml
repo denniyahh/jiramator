@@ -26,6 +26,7 @@ jiramator = "jiramator.cli:cli"
 dev = [
     "pytest>=8.0",
     "pytest-mock>=3.12",
+    "ruff>=0.16,<0.17",
 ]
 
 [tool.setuptools.packages.find]
@@ -34,3 +35,17 @@ include = ["jiramator*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["jiramator", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+# Long lines are left to judgement (no formatter is enforced); prose and
+# f-string messages are often clearer unwrapped.
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["jiramator"]

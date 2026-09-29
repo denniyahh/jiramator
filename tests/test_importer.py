@@ -571,8 +571,8 @@ class TestRunImport:
         assert result.created == [(1, "Risk A", "CA-6001")]
 
     def test_resolves_sprint_from_name_lookup(self):
-        from jiramator.importer import run_import
         from jiramator.config import TeamConfig
+        from jiramator.importer import run_import
 
         org = _org_config()
         org.bulk_create.field_aliases["Sprint"] = "sprint_field"
@@ -602,8 +602,8 @@ class TestRunImport:
         assert result.created == [(1, "Risk A", "CA-6002")]
 
     def test_unresolvable_sprint_name_warns_and_creates_without_it(self):
-        from jiramator.importer import run_import
         from jiramator.config import TeamConfig
+        from jiramator.importer import run_import
 
         org = _org_config()
         org.bulk_create.field_aliases["Sprint"] = "sprint_field"

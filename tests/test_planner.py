@@ -7,8 +7,7 @@ only the interactive prompts and HTTP layer are faked.
 
 from __future__ import annotations
 
-from typing import Any
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from rich.console import Console
@@ -31,14 +30,13 @@ from jiramator.planner import (
     _display_results,
     _extract_field,
     _extract_summary,
-    _prompt_pi_number,
     _prompt_fix_versions,
+    _prompt_pi_number,
     make_plan_inputs,
     normalize_pi_number,
     normalize_versions,
     run_plan,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

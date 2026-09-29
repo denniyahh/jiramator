@@ -1,24 +1,23 @@
 """Tests for org config and team config loading and validation."""
 
-import os
 from pathlib import Path
 
 import pytest
 import yaml
+from pydantic import ValidationError
 
 from jiramator.config import (
     EpicTemplate,
     OrgConfig,
     SprintConfig,
     TeamConfig,
+    TeamDefaults,
     TicketTemplate,
     _collect_epic_refs,
     _validate_template_vars,
     load_org_config,
     load_team_config,
 )
-from pydantic import ValidationError
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -133,18 +132,18 @@ class TestOrgConfigParsing:
         assert cfg.custom_fields == {}
 
     def test_missing_jira_url_raises(self) -> None:
-        with pytest.raises(Exception):  # ValidationError
+        with pytest.raises(ValidationError):
             OrgConfig(
                 sprints={"count": 4, "standard_length_weeks": 2, "long_length_weeks": 3},
             )
 
     def test_missing_sprints_raises(self) -> None:
-        with pytest.raises(Exception):  # ValidationError
+        with pytest.raises(ValidationError):
             OrgConfig(jira_url="https://example.atlassian.net")
 
     def test_invalid_url_raises(self, org_config_data: dict) -> None:
         org_config_data["jira_url"] = "not-a-url"
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             OrgConfig(**org_config_data)
 
 
@@ -175,7 +174,7 @@ class TestSprintConfig:
             )
 
     def test_zero_count_raises(self) -> None:
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             SprintConfig(
                 count=0,
                 standard_length_weeks=2,
@@ -492,7 +491,7 @@ class TestTicketTemplate:
         assert len(tmpl.long_sprint_suffix) == 3
 
     def test_negative_extra_raises(self) -> None:
-        with pytest.raises(Exception):  # ge=0 validation
+        with pytest.raises(ValidationError):  # ge=0 validation
             TicketTemplate(
                 summary="Bad {sprint_num}",
                 extra_on_long_sprint=-1,
@@ -565,11 +564,11 @@ class TestTeamConfig:
         assert cfg.per_sprint_tickets == []
 
     def test_missing_project_key_raises(self) -> None:
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             TeamConfig(team_name="NoProject")
 
     def test_missing_team_name_raises(self) -> None:
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             TeamConfig(project_key="X")
 
     def test_duplicate_epic_keys_raises(self) -> None:
@@ -816,14 +815,6 @@ class TestLoadTeamConfig:
 # ===========================================================================
 # PHASE 02-01 — TEAM DEFAULTS (TEMPLATE INHERITANCE)
 # ===========================================================================
-
-
-import io
-
-from rich.console import Console
-
-from jiramator.config import TeamDefaults
-from jiramator.error_format import ConfigConflictWarning
 
 
 class TestTeamDefaultsPydantic:

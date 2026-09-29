@@ -14,7 +14,6 @@ from jiramator.importer import _row_template_key, run_import
 from jiramator.jira_client import JiraApiError
 from jiramator.run_report import IssueResult, RunReport
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

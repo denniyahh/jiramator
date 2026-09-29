@@ -20,7 +20,6 @@ from click.testing import CliRunner
 from jiramator.config import load_org_config, load_team_config
 from jiramator.config_merge import merge_configs
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

@@ -24,10 +24,20 @@ python -m pytest -v                                          # all tests
 python -m pytest tests/test_config.py                        # single file
 python -m pytest -k "TestBuildEpics"                          # single class/test by name
 python -m pytest --cov=jiramator --cov-report=term-missing    # with coverage
+
+# Lint (ruff; config in pyproject.toml)
+ruff check .                                                  # check
+ruff check --fix .                                            # autofix (imports, pyupgrade)
 ```
 
-No linter or formatter is configured. CI (`.github/workflows/ci.yml`) runs the full suite on
-Linux/macOS/Windows × Python 3.11/3.12/3.13 via `pip install -e ".[dev]"` + `python -m pytest -q`.
+Ruff is the linter (`E`, `F`, `W`, `I`, `UP`, `B`; `E501` ignored). No formatter is enforced —
+don't run `ruff format` over the codebase. CI (`.github/workflows/ci.yml`) runs `ruff check`
+once, then the full test suite on Linux/macOS/Windows × Python 3.11/3.12/3.13 via
+`pip install -e ".[dev]"` + `python -m pytest -q`.
+
+When patching a symbol in tests, patch it where it is **used** (e.g.
+`jiramator.importer.build_preview_report`), not a re-import in another module — ruff removes
+unused imports, which breaks patches that target them.
 
 ## Architecture
 

@@ -186,6 +186,7 @@ class TestEncodingDetection:
         """R2: xlsx ignores encoding_override (binary reader; openpyxl owns
         encoding). Passing the parameter must not raise or alter results."""
         import openpyxl
+
         from jiramator.spreadsheet import read_spreadsheet
 
         wb = openpyxl.Workbook()
@@ -261,6 +262,7 @@ class TestEncodingDetection:
     def test_N5a_announcement_on_cp1252(self, capsys):
         """N5a: cp1252 import emits 'Read <path> as <encoding>' to stderr."""
         import re
+
         from jiramator.spreadsheet import read_spreadsheet
         read_spreadsheet(FIXTURE_DIR / "cp1252.csv")
         captured = capsys.readouterr()

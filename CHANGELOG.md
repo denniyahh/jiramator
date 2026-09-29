@@ -3,6 +3,20 @@
 All notable changes to Jiramator are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- **Ruff linting.** `ruff` is now a dev dependency, configured in `pyproject.toml`
+  (`E`, `F`, `W`, `I`, `UP`, `B`), and enforced by a new `lint` job in CI. Existing
+  findings were fixed: import order, unused imports, `datetime.UTC`, explicit
+  `raise ... from None`, and specific exception types in tests instead of bare
+  `pytest.raises(Exception)`.
+
+### Fixed
+- Four `import` CLI tests patched `jiramator.cli.build_preview_report`, a symbol
+  `cli.py` never called, so the patch was a no-op. They now patch
+  `jiramator.importer.build_preview_report`, where it is actually used.
+
 ## [1.2.8] — 2026-07-17
 
 ### Changed

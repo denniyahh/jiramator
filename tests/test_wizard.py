@@ -8,7 +8,6 @@ the Jira client and Rich prompts mocked — matching the planner test convention
 
 from __future__ import annotations
 
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -25,7 +24,6 @@ from jiramator.wizard import (
     run_init,
     slugify,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

@@ -37,7 +37,15 @@ Run the full suite after changing config, import, coercion, or Jira client
 behavior. The exact test count changes over time; rely on pytest's own output
 rather than any hardcoded number in the docs.
 
-No linter or formatter is currently configured for this project.
+Lint with [ruff](https://docs.astral.sh/ruff/) (installed by `.[dev]`; config in
+`pyproject.toml`). CI fails on lint errors:
+
+```bash
+ruff check .            # check
+ruff check --fix .      # autofix import order, unused imports, pyupgrade
+```
+
+No formatter is enforced — please don't reformat unrelated code.
 
 ### Testing conventions
 
