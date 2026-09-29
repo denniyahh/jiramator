@@ -94,6 +94,7 @@ contract users rely on.
 | Milestone v1.3 = Hardening & Reliability | Only documented open work; aligns with Core Value (correct & safe to re-run) | — Pending |
 | Ambiguous user match → skip + warn (not first result) | Mirrors existing "could not resolve" UX; wrong assignment is worse than none | — Pending |
 | `.planning/` stays local (gitignored, `commit_docs: false`) | Personal workflow state never committed to shared branches | ✓ Good |
+| Each phase runs in its own worktree: `wsx new gsd/phase-NN-<slug>` off `develop`, merged back `--no-ff` per phase; GSD `branching_strategy: none` inside it, `git.base_branch: develop`, `workflow.use_worktrees: true` for executor isolation | Global rule: never commit to integration branches, all dev in dedicated worktrees. GSD's `phase` strategy would `git switch` in the current worktree and fork from `origin/HEAD` (`main`) | ✓ Good |
 | Skip domain research | Brownfield hardening of a well-mapped codebase; codebase map suffices | — Pending |
 
 ## Evolution
