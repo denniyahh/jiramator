@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import click
@@ -20,7 +20,6 @@ from jiramator.config import load_org_config, load_team_config
 from jiramator.config_merge import merge_configs
 from jiramator.error_format import ConfigValidationError
 from jiramator.importer import (
-    build_preview_report,
     render_import_execution_report,
     render_preview_report,
     run_import,
@@ -637,7 +636,7 @@ def import_command(
     # Build a report for live runs (cli owns the lifecycle for import).
     report = RunReport(
         command=list(sys.argv),
-        started_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        started_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         team_config_path=str(team_config_path.resolve()),
         org_config_path=str(resolved_org_path.resolve()),
         team_name=team_config.team_name,
@@ -662,7 +661,7 @@ def import_command(
         )
     except (ValueError, JiraApiError) as exc:
         # Persist the (possibly partial) report before exiting.
-        report.ended_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        report.ended_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
         try:
             write_report_atomic(report, report_path)
         except OSError:
@@ -670,7 +669,7 @@ def import_command(
         _fail(f"Import error: {exc}")
 
     # Finalize report status.
-    report.ended_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    report.ended_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
     failed_count = report.counts.get("failed", 0)
     created_count = report.counts.get("created", 0)
     skipped_count = report.counts.get("skipped", 0)
@@ -816,7 +815,7 @@ def update_command(
         console.print(render_update_preview_report(result.preview, preview_rows=preview_rows))
         return
 
-    started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    started_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
     try:
         client = JiraClient(org_config)
         jira_fields = client.get_fields()
@@ -830,7 +829,7 @@ def update_command(
     except (ValueError, JiraApiError) as exc:
         _fail(f"Update error: {exc}")
 
-    ended_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    ended_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
     report = _update_report_from_result(
         result,
         command=list(sys.argv),

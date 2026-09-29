@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from jiramator.planner import _resolve_sprint_ids, _DEFAULT_SPRINT_FIELD
+from jiramator.planner import _DEFAULT_SPRINT_FIELD, _resolve_sprint_ids
 
 
 def _make_org_config(sprint_field=None):
@@ -299,7 +299,7 @@ class TestSprintsExistIntegration:
         planner.Confirm.ask = MagicMock(return_value=True)
 
         # Build minimal real configs via dicts → Pydantic
-        from jiramator.config import OrgConfig, TeamConfig, SprintConfig
+        from jiramator.config import OrgConfig, SprintConfig, TeamConfig
         from jiramator.run_report import RunReport
 
         org = OrgConfig(

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from jiramator.config import OrgConfig, TeamConfig, TicketTemplate, _EPIC_REF_RE, _TEMPLATE_VAR_RE
+from jiramator.config import _EPIC_REF_RE, _TEMPLATE_VAR_RE, OrgConfig, TeamConfig, TicketTemplate
 from jiramator.value_coercion import _adf_paragraph
 from jiramator.yaml_loader import strip_line_markers as _strip_line_markers
 

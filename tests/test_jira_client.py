@@ -5,17 +5,15 @@ All HTTP calls are mocked — no real Jira API traffic.
 
 from __future__ import annotations
 
-import json
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import certifi
 import pytest
 import requests
 
 from jiramator.config import OrgConfig
-from jiramator.jira_client import JiraApiError, JiraClient, _BULK_BATCH_SIZE
-
+from jiramator.jira_client import JiraApiError, JiraClient
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -266,7 +264,10 @@ class TestCreateIssuesBulk:
 
         # Verify batch sizes in the request bodies
         calls = client._session.post.call_args_list
-        body = lambda i: calls[i].kwargs.get("json") or calls[i][1].get("json")
+
+        def body(i: int) -> dict:
+            return calls[i].kwargs.get("json") or calls[i][1].get("json")
+
         assert len(body(0)["issueUpdates"]) == 3
         assert len(body(1)["issueUpdates"]) == 3
         assert len(body(2)["issueUpdates"]) == 1

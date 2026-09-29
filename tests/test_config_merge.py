@@ -10,25 +10,29 @@ Covers:
 
 from __future__ import annotations
 
+import copy
+import io
 from pathlib import Path
 
-import pytest
+from rich.console import Console
 
 from jiramator.config import (
     EpicTemplate,
+    OrgConfig,
+    SprintConfig,
     TeamConfig,
     TeamDefaults,
     TicketTemplate,
 )
 from jiramator.config_merge import (
     _apply_team_layer_to_templates as merge_team_defaults_into_templates,
+)
+from jiramator.config_merge import (
     canonical_form,
     concat_dedup_lists,
     deep_merge_dicts,
 )
-from jiramator.error_format import ConfigConflictWarning
 from jiramator.yaml_loader import safe_load_with_lines
-
 
 # ---------------------------------------------------------------------------
 # canonical_form
@@ -361,13 +365,6 @@ class TestMergeConfigsTeamLayer:
 # Phase 02-02 — merge_configs orchestrator (org → team-defaults → templates)
 # ===========================================================================
 
-
-import copy
-import io
-
-from rich.console import Console
-
-from jiramator.config import OrgConfig, SprintConfig
 
 
 def _make_org(default_fields: dict | None = None) -> OrgConfig:

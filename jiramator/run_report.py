@@ -25,7 +25,7 @@ import json
 import os
 import tempfile
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -199,7 +199,7 @@ def default_report_path(team_config_path: Path) -> Path:
     defense in depth. (Path.stem already strips parents and the extension,
     but the replace is cheap insurance against future surprises.)
     """
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     slug = team_config_path.stem.replace("/", "_")
     return RUNS_DIR / f"{stamp}-{slug}.json"
 

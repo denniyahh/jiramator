@@ -9,10 +9,18 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, ValidationError, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    HttpUrl,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from jiramator.error_format import ConfigValidationError, did_you_mean, format_loc
-from jiramator.yaml_loader import LINE_KEY, resolve_line, safe_load_with_lines, strip_line_markers
+from jiramator.yaml_loader import resolve_line, safe_load_with_lines, strip_line_markers
 
 # Known template variables that can appear in {brackets} in config strings.
 # The ticket builder will provide concrete values for these at runtime.
@@ -148,7 +156,7 @@ class OrgConfig(BaseModel):
             raise KeyError(
                 f"Custom field '{logical_name}' is not defined in org config. "
                 f"Available fields: {list(self.custom_fields.keys())}"
-            )
+            ) from None
 
     def resolve_credentials(self) -> tuple[str, str]:
         """Read Jira credentials from environment variables.
@@ -639,7 +647,7 @@ class TeamConfig(BaseModel):
         epic_keys = {e.key for e in self.recurring_epics} | set(self.existing_epics)
         all_templates = self.per_release_tickets + self.per_sprint_tickets
 
-        for i, tmpl in enumerate(all_templates):
+        for tmpl in all_templates:
             refs = _collect_epic_refs(tmpl.fields)
             unknown = refs - epic_keys
             if unknown:
