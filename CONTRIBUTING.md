@@ -123,7 +123,7 @@ points. Both tiers are Pydantic models loaded via `load_org_config()` /
   arguments. Rich console for all output.
 
 A more detailed version of these conventions (kept in sync for AI coding
-assistants) lives in [`.github/copilot-instructions.md`](.github/copilot-instructions.md).
+assistants) lives in [`AGENTS.md`](AGENTS.md).
 
 ## Roadmap / future enhancements
 
