@@ -46,6 +46,7 @@ contract users rely on.
 - [ ] `init` wizard never writes a silent placeholder custom field ID
 - [ ] Old run reports can be pruned
 - [ ] Config validation errors survive context-manager unwinding on Python 3.14 (v1.0 DEFER-02-01)
+- [ ] `plan` build errors never surface as a raw traceback
 
 ### Out of Scope
 

@@ -44,6 +44,7 @@
 - [ ] **HYG-03**: User can prune run reports older than N days via a CLI command/flag (e.g. `jiramator reports prune --older-than 30d`)
 - [ ] **HYG-04**: Pruning supports `--dry-run` listing files that would be deleted
 - [ ] **HYG-05**: `ConfigValidationError` propagates through `@contextmanager` / `ExitStack` / `try-except BaseException` scopes on Python 3.11–3.14 without `FrozenInstanceError`, keeping value equality on `(file, line, field_path, reason)` (carried over from v1.0 DEFER-02-01)
+- [ ] **HYG-06**: When `plan` fails to build tickets (e.g. a builder `ValueError` such as a missing `release_sprint_schedule` entry for the given release count), it prints the actionable message via the Rich console and exits 1 — never a Python traceback
 
 ## v2 Requirements
 
@@ -102,10 +103,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | HYG-03 | Phase 4 | Pending |
 | HYG-04 | Phase 4 | Pending |
 | HYG-05 | Phase 4 | Pending |
+| HYG-06 | Phase 4 | Pending |
 
 **Coverage:**
-- v1 requirements: 22 total
-- Mapped to phases: 22
+- v1 requirements: 23 total
+- Mapped to phases: 23
 - Unmapped: 0 ✓
 
 ---
