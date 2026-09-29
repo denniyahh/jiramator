@@ -6,7 +6,6 @@ from typing import Any
 
 from jiramator.config import BulkCreateConfig
 
-
 _BUILTIN_FIELD_TYPES = {
     "issuetype": "name_object",
     "priority": "name_object",

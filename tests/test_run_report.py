@@ -7,7 +7,6 @@ Plan: 01-03 Task 1.
 from __future__ import annotations
 
 import json
-import os
 import sys
 from dataclasses import asdict
 from pathlib import Path
@@ -15,7 +14,6 @@ from pathlib import Path
 import pytest
 
 from jiramator.run_report import (
-    SCHEMA_VERSION,
     ConfigDriftError,
     IssueResult,
     RunReport,
@@ -24,7 +22,6 @@ from jiramator.run_report import (
     find_resumable,
     write_report_atomic,
 )
-
 
 # ---------------------------------------------------------------------------
 # Envelope round-trip

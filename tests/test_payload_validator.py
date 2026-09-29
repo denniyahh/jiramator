@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from jiramator.payload_validator import validate_ticket_payload
 
-
 # ---------------------------------------------------------------------------
 # Missing required fields
 # ---------------------------------------------------------------------------

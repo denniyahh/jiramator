@@ -22,10 +22,8 @@ from jiramator.error_format import ConfigValidationError
 from jiramator.run_report import (
     SCHEMA_VERSION,
     ConfigDriftError,
-    IssueResult,
     RunReport,
 )
-
 
 # ---------------------------------------------------------------------------
 # Shared fixtures

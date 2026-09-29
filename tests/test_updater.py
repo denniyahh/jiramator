@@ -7,7 +7,6 @@ import pytest
 
 from jiramator.config import BulkCreateConfig, OrgConfig
 from jiramator.updater import (
-    RowUpdateResult,
     UpdateRunResult,
     build_row_update_payload,
     build_update_preview_report,
@@ -16,7 +15,6 @@ from jiramator.updater import (
     run_update,
     validate_unique_issue_keys,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
