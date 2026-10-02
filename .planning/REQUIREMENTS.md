@@ -14,6 +14,7 @@ defect. Feature work moved to v1.3 candidate seeds in `.planning/seeds/`.
 - [ ] **INV-01**: The root cause of the live `plan` failure on 2026-07-21 (work clone report `20260721T121841Z-calcs.json`, status `failed`, 0 created/failed) is identified and either fixed here or filed
 - [ ] **INV-02**: The root cause of `fixVersions: Version name 'Fix versions' is not valid` (2026-07-13 `plan`, dm-test) is identified as config or code, and fixed or documented
 - [ ] **INV-03**: Every `failed` run with 0 counts in the work clone's reports (2026-07-16, 07-17, 07-21) is classified: covered by HYG-04, config error, or a new defect
+- [ ] **INV-04**: When a command that writes a run report exits on an exception, the report records `ended_at` and the error (exception type + message) before re-raising; reports without these fields still load and resume
 
 ### Import Preflight (PRE)
 
@@ -66,6 +67,7 @@ smoke suite, dead `__version__` removal.
 | INV-01 | Phase 1 | Pending |
 | INV-02 | Phase 1 | Pending |
 | INV-03 | Phase 1 | Pending |
+| INV-04 | Phase 1 | Pending |
 | PRE-01 | Phase 2 | Pending |
 | PRE-02 | Phase 2 | Pending |
 | PRE-03 | Phase 2 | Pending |
@@ -82,8 +84,8 @@ smoke suite, dead `__version__` removal.
 | TEST-01 | Phase 4 | Pending |
 
 **Coverage:**
-- v1.2.9 requirements: 17 total
-- Mapped to phases: 17
+- v1.2.9 requirements: 18 total
+- Mapped to phases: 18
 - Unmapped: 0
 
 ---

@@ -1,12 +1,20 @@
 ---
-gsd_state_version: '1.0'
+gsd_state_version: "1.0"
+milestone: v1.2.9
+milestone_name: Hardening
+current_phase: 1
+current_phase_name: Production Triage
 status: planning
+stopped_at: Phase 1 context gathered
+last_updated: "2026-10-02T16:16:43.281Z"
+last_activity: 2026-09-29
+last_activity_desc: Re-scoped v1.3 draft to v1.2.9 Hardening with the user (17 reqs, 4 phases); feature items planted as v1.3 seeds
+state_head: 6676bdc80ea6998b916783fe1d9e60c0f83bd197
 progress:
   total_phases: 4
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
-  percent: 0
 ---
 
 # Project State
@@ -23,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 Phase: 1 of 4 (Production Triage)
 Plan: 0 of TBD in current phase
 Status: Ready to plan
-Last activity: 2026-09-29 — Re-scoped v1.3 draft to v1.2.9 Hardening with the user (17 reqs, 4 phases); feature items planted as v1.3 seeds
+Last activity: 2026-10-02 — Phase 1 context gathered (4 areas; added INV-04, 18 reqs)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -78,6 +86,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-29 09:31
-Stopped at: v1.2.9 roadmap approved; ready for `wsx new gsd/phase-01-production-triage` then `/gsd-discuss-phase 1`
-Resume file: None
+Last session: 2026-10-02T16:16:43.261Z
+Stopped at: Phase 1 context gathered
+Resume file: .planning/phases/01-production-triage/01-CONTEXT.md

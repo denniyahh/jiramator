@@ -33,11 +33,12 @@ Decimal phases appear between their surrounding integers in numeric order.
 ### Phase 1: Production Triage
 **Goal**: Every unexplained production failure in the work clone's run reports has a known root cause, and each is either fixed, folded into a later phase, or filed
 **Depends on**: Nothing (first phase; findings may add requirements to Phases 2–4)
-**Requirements**: INV-01, INV-02, INV-03
+**Requirements**: INV-01, INV-02, INV-03, INV-04
 **Success Criteria** (what must be TRUE):
   1. The 2026-07-21 live `plan` failure (`20260721T121841Z-calcs.json`) has a written root cause, reproduced or explained from the report and code
   2. The `Version name 'Fix versions' is not valid` error is attributed to config or code; if code, it is fixed with a regression test
   3. Each zero-count `failed` report from 2026-07-16/17/21 is classified (HYG-04 traceback, config error, or new defect) and any new defect has a requirement or issue
+  4. A `plan` or `import` that crashes leaves a run report with `ended_at` and the exception type/message; pre-existing reports still load and `--resume` still works
 **Plans**: TBD
 
 ### Phase 2: Import Preflight Validation
