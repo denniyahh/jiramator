@@ -14,11 +14,15 @@ from pathlib import Path
 import pytest
 
 from jiramator.run_report import (
+    _ERROR_MESSAGE_CAP,
+    ABORTED_ERROR_TYPE,
     ConfigDriftError,
     IssueResult,
     RunReport,
+    abort_info,
     compute_resolved_hash,
     default_report_path,
+    error_info,
     find_resumable,
     write_report_atomic,
 )
@@ -80,6 +84,58 @@ class TestEnvelopeRoundTrip:
         """No schema_version key at all → treats as None != 1 → rejects."""
         with pytest.raises(ValueError):
             RunReport.from_envelope({})
+
+
+    def test_26_error_round_trips(self):
+        r = RunReport(error={"type": "ValueError", "message": "boom"})
+        env = r.to_envelope()
+        assert env["run"]["error"] == {"type": "ValueError", "message": "boom"}
+        r2 = RunReport.from_envelope(json.loads(json.dumps(env)))
+        assert asdict(r2) == asdict(r)
+
+    def test_27_legacy_envelope_without_error_loads(self):
+        # Literal v1.2.8-shaped envelope: every pre-INV-04 key, no "error".
+        legacy = {
+            "schema_version": 1,
+            "run": {
+                "schema_version": 1,
+                "command": ["jiramator", "plan"],
+                "started_at": "2026-04-29T10:00:00+00:00",
+                "ended_at": None,
+                "team_config_path": "/abs/team.yaml",
+                "org_config_path": "/abs/org.yaml",
+                "team_name": "T",
+                "pi_label": "PI28",
+                "versions": ["26.1.1"],
+                "resolved_config_hash": "abc",
+                "status": "failed",
+                "counts": {"created": 0, "skipped": 0, "failed": 0},
+                "issues": [
+                    {
+                        "template_key": "epic:bau", "kind": "epic",
+                        "status": "created", "jira_key": "X-1",
+                        "error": None, "fields": [],
+                    },
+                ],
+            },
+        }
+        r = RunReport.from_envelope(legacy)
+        assert r.error is None
+        assert r.issues[0].jira_key == "X-1"
+
+    def test_28_unknown_keys_ignored(self):
+        env = RunReport(
+            issues=[IssueResult(template_key="a", kind="epic", status="created")],
+        ).to_envelope()
+        env["run"]["future_run_key"] = {"x": 1}
+        env["run"]["issues"][0]["future_issue_key"] = "y"
+        r = RunReport.from_envelope(env)
+        assert not hasattr(r, "future_run_key")
+        assert r.issues[0].template_key == "a"
+        assert "future_issue_key" not in asdict(r.issues[0])
+
+    def test_29_error_omitted_when_none(self):
+        assert "error" not in RunReport().to_envelope()["run"]
 
 
 # ---------------------------------------------------------------------------
@@ -154,6 +210,68 @@ class TestDefaultReportPath:
         # Path("a/b/c.yaml").stem == "c" (Path.stem strips the directory),
         # but the helper documents `/` → `_` for defense in depth.
         assert p.name.endswith("-c.json")
+
+
+# ---------------------------------------------------------------------------
+# Error capture (INV-04)
+# ---------------------------------------------------------------------------
+
+
+class TestErrorInfo:
+    def test_30_error_info_truncates_at_cap(self):
+        info = error_info(ValueError("x" * 5000))
+        assert info["type"] == "ValueError"
+        assert len(info["message"]) == _ERROR_MESSAGE_CAP + 1
+        assert info["message"].endswith("…")
+
+    def test_30b_cap_measured_in_code_points(self):
+        info = error_info(ValueError("é" * (_ERROR_MESSAGE_CAP + 10)))
+        assert info["message"] == "é" * _ERROR_MESSAGE_CAP + "…"
+        exact = error_info(ValueError("é" * _ERROR_MESSAGE_CAP))
+        assert exact["message"] == "é" * _ERROR_MESSAGE_CAP
+
+    def test_31_error_info_empty_message_kept(self):
+        assert error_info(KeyboardInterrupt()) == {
+            "type": "KeyboardInterrupt", "message": "",
+        }
+        r = RunReport(error=error_info(KeyboardInterrupt()))
+        assert r.to_envelope()["run"]["error"]["message"] == ""
+
+    def test_32_error_info_redacts_credentials(self):
+        basic = error_info(RuntimeError("Authorization: Basic dXNlcjp0b2tlbg=="))
+        assert "***" in basic["message"]
+        assert "Basic" in basic["message"]
+        assert "dXNlcjp0b2tlbg==" not in basic["message"]
+
+        bearer = error_info(RuntimeError("header Bearer abc.def.ghi rejected"))
+        assert "abc.def.ghi" not in bearer["message"]
+        assert "Bearer ***" in bearer["message"]
+
+        tok = error_info(RuntimeError("tok SECRET123 here"), secrets=("SECRET123",))
+        assert "***" in tok["message"]
+        assert "SECRET123" not in tok["message"]
+
+        # An empty-string secret is ignored (would otherwise mangle every char)
+        plain = error_info(RuntimeError("nothing secret"), secrets=("",))
+        assert plain["message"] == "nothing secret"
+
+    def test_32b_redaction_before_truncation(self):
+        secret = "S" * 50
+        msg = "x" * (_ERROR_MESSAGE_CAP - 10) + secret
+        info = error_info(RuntimeError(msg), secrets=(secret,))
+        assert "S" not in info["message"]
+
+    def test_32c_abort_info_uses_aborted_label(self):
+        info = abort_info("Credential error: tok SECRET", secrets=("SECRET",))
+        assert info["type"] == ABORTED_ERROR_TYPE == "Aborted"
+        assert info["message"] == "Credential error: tok ***"
+
+    def test_33_non_ascii_message_round_trips(self, tmp_path):
+        path = tmp_path / "r.json"
+        r = RunReport(error=error_info(RuntimeError("café — ✗")))
+        write_report_atomic(r, path)
+        loaded = RunReport.from_envelope(json.loads(path.read_text(encoding="utf-8")))
+        assert loaded.error == {"type": "RuntimeError", "message": "café — ✗"}
 
 
 # ---------------------------------------------------------------------------
@@ -287,6 +405,29 @@ class TestFindResumable:
         assert via_real is not None
         assert via_link is not None
         assert via_real == via_link
+
+
+    def test_34_report_with_error_still_resumable(self, tmp_path, monkeypatch):
+        runs = tmp_path / "runs"
+        runs.mkdir()
+        monkeypatch.setattr("jiramator.run_report.RUNS_DIR", runs)
+        team_path = tmp_path / "team.yaml"
+        team_path.write_text("team_name: x\n")
+
+        r = RunReport(
+            team_config_path=str(team_path.resolve()),
+            started_at="2026-04-28T11:00:00Z",
+            ended_at="2026-04-28T11:00:05Z",
+            status="failed",
+            error={"type": "ConnectionError", "message": "boom"},
+        )
+        (runs / "E.json").write_text(json.dumps(r.to_envelope()))
+
+        result = find_resumable(team_path)
+        assert result is not None
+        assert result.name == "E.json"
+        loaded = RunReport.from_envelope(json.loads(result.read_text()))
+        assert loaded.error == {"type": "ConnectionError", "message": "boom"}
 
 
 # ---------------------------------------------------------------------------

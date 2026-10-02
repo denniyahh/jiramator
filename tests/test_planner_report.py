@@ -559,3 +559,8 @@ class TestPersistOnError:
         # 1 epic completed before interrupt
         assert run["counts"]["created"] >= 1
         assert run["status"] == "failed"
+        # INV-04 / D-12: the cause and end time are recorded before re-raise
+        assert run["ended_at"] is not None
+        assert run["error"] == {
+            "type": "KeyboardInterrupt", "message": "simulated Ctrl-C",
+        }

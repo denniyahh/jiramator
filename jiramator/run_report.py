@@ -14,6 +14,9 @@ Public surface (Plan 04 callers depend on these names verbatim):
 - ``find_resumable`` — most-recent partial/failed report whose stored
   team_config_path matches the resolved input; corrupt files skipped.
 - ``compute_resolved_hash`` — sha256(canonical-json) of (org, team, pi, versions).
+- ``error_info`` / ``abort_info`` — build the sanitized run-level ``error``
+  record (``{"type", "message"}``) for crashes and deliberate aborts (INV-04).
+- ``ABORTED_ERROR_TYPE`` — the stable ``error.type`` label for deliberate aborts.
 
 Stdlib only — no external imports.
 """
@@ -23,13 +26,16 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import tempfile
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:  # avoid an import cycle if config ever pulls run_report
+    from collections.abc import Iterable
+
     from jiramator.config import OrgConfig, TeamConfig
 
 
@@ -39,6 +45,11 @@ if TYPE_CHECKING:  # avoid an import cycle if config ever pulls run_report
 
 SCHEMA_VERSION: int = 1
 RUNS_DIR: Path = Path(".jiramator/runs")
+
+# Max length (in code points) of a recorded run-level error message.
+_ERROR_MESSAGE_CAP: int = 2000
+# ``error.type`` recorded for deliberate aborts (user decline, bad creds, ...).
+ABORTED_ERROR_TYPE: str = "Aborted"
 
 IssueStatus = Literal["created", "updated", "skipped", "failed", "pending"]
 RunStatus = Literal["success", "partial", "failed"]
@@ -97,6 +108,11 @@ class RunReport:
             leaves the report marked failed unless it had time to flip it.
         counts: rolling counters; total per-issue == sum of values.
         issues: per-template/per-version IssueResult entries.
+        error: Run-level failure record ``{"type": str, "message": str}`` set
+            when the run ends on an exception or deliberate abort; ``None``
+            for clean runs (and then omitted from the on-disk envelope so the
+            file stays loadable by older jiramator versions). Distinct from
+            the per-row ``IssueResult.error`` string.
     """
 
     schema_version: int = SCHEMA_VERSION
@@ -114,14 +130,20 @@ class RunReport:
         default_factory=lambda: {"created": 0, "skipped": 0, "failed": 0}
     )
     issues: list[IssueResult] = field(default_factory=list)
+    error: dict[str, str] | None = None
 
     def to_envelope(self) -> dict[str, Any]:
         """Render as ``{"schema_version": N, "run": {...}}`` for JSON write.
 
         ``asdict`` recurses into nested IssueResult dataclasses producing
-        plain dicts — that's the on-disk shape we want.
+        plain dicts — that's the on-disk shape we want. The ``error`` key is
+        omitted when ``None`` so clean reports stay byte-compatible with
+        readers that predate the field (D-13).
         """
-        return {"schema_version": self.schema_version, "run": asdict(self)}
+        run = asdict(self)
+        if run.get("error") is None:
+            run.pop("error", None)
+        return {"schema_version": self.schema_version, "run": run}
 
     @classmethod
     def from_envelope(cls, obj: dict[str, Any]) -> RunReport:
@@ -137,9 +159,78 @@ class RunReport:
                 f"Unsupported run report schema_version: {obj.get('schema_version')}; "
                 f"this version of jiramator only reads schema_version={SCHEMA_VERSION}."
             )
-        run = dict(obj["run"])  # shallow copy — don't mutate caller's dict
-        run["issues"] = [IssueResult(**i) for i in run.get("issues", [])]
+        # Keep only known field names so reports written by a newer jiramator
+        # (additive optional keys) still load instead of raising TypeError.
+        run_names = {f.name for f in fields(cls)}
+        issue_names = {f.name for f in fields(IssueResult)}
+        run = {k: v for k, v in dict(obj["run"]).items() if k in run_names}
+        run["issues"] = [
+            IssueResult(**{k: v for k, v in i.items() if k in issue_names})
+            for i in run.get("issues", [])
+        ]
         return cls(**run)
+
+
+# ---------------------------------------------------------------------------
+# Error capture
+# ---------------------------------------------------------------------------
+
+# ``Basic``/``Bearer`` scheme followed by a credential token (Authorization
+# header text echoed into an exception message). The scheme word is kept.
+_AUTH_CREDENTIAL_RE = re.compile(r"\b(Basic|Bearer)\s+[^\s'\",;]+")
+
+
+def _sanitize_message(message: str, secrets: Iterable[str]) -> str:
+    """Redact secrets from ``message`` and cap its length.
+
+    Redaction runs BEFORE truncation so a cut can never expose a prefix of a
+    token. Every non-empty value in ``secrets`` is replaced with ``***``,
+    then any ``Basic``/``Bearer`` credential becomes ``<scheme> ***``.
+    The cap is measured in ``str`` length (code points); longer messages are
+    cut to ``_ERROR_MESSAGE_CAP`` code points plus a trailing ``…``.
+    """
+    for secret in secrets:
+        if secret:
+            message = message.replace(secret, "***")
+    message = _AUTH_CREDENTIAL_RE.sub(r"\1 ***", message)
+    if len(message) > _ERROR_MESSAGE_CAP:
+        message = message[:_ERROR_MESSAGE_CAP] + "…"
+    return message
+
+
+def error_info(exc: BaseException, *, secrets: Iterable[str] = ()) -> dict[str, str]:
+    """Build the run-level ``error`` record for an exception.
+
+    Only the exception class name and ``str(exc)`` are recorded — never a
+    traceback, ``repr``, request object, headers, or locals.
+
+    Args:
+        exc: The exception that ended the run. Only read, never mutated.
+        secrets: Literal values (e.g. the Jira token) to redact.
+
+    Returns:
+        ``{"type": <class name>, "message": <sanitized message>}``.
+    """
+    return {
+        "type": type(exc).__name__,
+        "message": _sanitize_message(str(exc), secrets),
+    }
+
+
+def abort_info(reason: str, *, secrets: Iterable[str] = ()) -> dict[str, str]:
+    """Build the run-level ``error`` record for a deliberate abort.
+
+    Args:
+        reason: Human-readable reason, matching what was printed to the user.
+        secrets: Literal values to redact from ``reason``.
+
+    Returns:
+        ``{"type": ABORTED_ERROR_TYPE, "message": <sanitized reason>}``.
+    """
+    return {
+        "type": ABORTED_ERROR_TYPE,
+        "message": _sanitize_message(reason, secrets),
+    }
 
 
 # ---------------------------------------------------------------------------
