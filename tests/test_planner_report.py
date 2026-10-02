@@ -564,3 +564,197 @@ class TestPersistOnError:
         assert run["error"] == {
             "type": "KeyboardInterrupt", "message": "simulated Ctrl-C",
         }
+
+
+# ---------------------------------------------------------------------------
+# INV-04: every plan exit path records a distinguishable run-level error
+# ---------------------------------------------------------------------------
+
+
+class _RequiredFieldFake(FakeJiraClient):
+    """Fake whose createmeta marks a field required that no payload sets."""
+
+    def get_createmeta_fields_by_type_name(self, project_key, issue_type_name):
+        return {"customfield_99999": {"required": True, "name": "Mandatory"}}
+
+
+class TestErrorCapture:
+    @staticmethod
+    def _run_live(org_config, team_config, console, report_path, fake, patches,
+                  *, expect=SystemExit, prior_report=None):
+        def go():
+            with patch("jiramator.planner.JiraClient", return_value=fake):
+                with pytest.raises(expect):
+                    run_plan(
+                        org_config, team_config,
+                        dry_run=False, console=console,
+                        report_path=report_path,
+                        prior_report=prior_report,
+                    )
+
+        _run_with_patches(patches, go)
+        return _read_report(report_path)["run"]
+
+    def test_final_confirm_decline_records_aborted_reason(
+        self, org_config, team_config, console, tmp_path,
+    ):
+        report_path = tmp_path / "r.json"
+        run = self._run_live(
+            org_config, team_config, console, report_path,
+            FakeJiraClient(), _patch_prompts(confirm_yes=False),
+        )
+        assert run["error"] == {
+            "type": "Aborted",
+            "message": "User declined ticket creation at the final confirmation.",
+        }
+        assert run["ended_at"] is not None
+        assert run["counts"] == {"created": 0, "skipped": 0, "failed": 0}
+        assert run["issues"] == []
+
+    def test_fix_version_decline_records_aborted_reason(
+        self, org_config, team_config, console, tmp_path,
+    ):
+        report_path = tmp_path / "r.json"
+        # "99.9.9" is absent from the fake's fix versions → create prompt.
+        run = self._run_live(
+            org_config, team_config, console, report_path,
+            FakeJiraClient(),
+            _patch_prompts(versions=("99.9.9",), confirm_yes=False),
+        )
+        assert run["error"]["type"] == "Aborted"
+        assert "Cannot proceed without fix versions" in run["error"]["message"]
+        assert "99.9.9" in run["error"]["message"]
+        assert run["ended_at"] is not None
+
+    def test_credential_error_records_aborted_reason(
+        self, org_config, team_config, console, tmp_path,
+    ):
+        report_path = tmp_path / "r.json"
+
+        def go():
+            with patch(
+                "jiramator.planner.JiraClient",
+                side_effect=ValueError("JIRA_TOKEN not set"),
+            ):
+                with pytest.raises(SystemExit):
+                    run_plan(
+                        org_config, team_config,
+                        dry_run=False, console=console,
+                        report_path=report_path,
+                    )
+
+        _run_with_patches(_patch_prompts(), go)
+        run = _read_report(report_path)["run"]
+        assert run["error"]["type"] == "Aborted"
+        assert run["error"]["message"].startswith("Credential error:")
+        assert "JIRA_TOKEN not set" in run["error"]["message"]
+
+    def test_preflight_problems_record_aborted_reason(
+        self, org_config, team_config, console, tmp_path,
+    ):
+        report_path = tmp_path / "r.json"
+        run = self._run_live(
+            org_config, team_config, console, report_path,
+            _RequiredFieldFake(), _patch_prompts(),
+        )
+        assert run["error"]["type"] == "Aborted"
+        assert "field problem" in run["error"]["message"]
+        assert run["ended_at"] is not None
+
+    def test_bulk_api_error_records_exception(
+        self, org_config, team_config, console, tmp_path,
+    ):
+        report_path = tmp_path / "r.json"
+        run = self._run_live(
+            org_config, team_config, console, report_path,
+            FakeJiraClient(fail_bulk=True), _patch_prompts(),
+        )
+        assert run["error"]["type"] == "JiraApiError"
+        assert "simulated bulk failure" in run["error"]["message"]
+        assert run["ended_at"] is not None
+
+    def test_epic_api_error_records_exception(
+        self, org_config, team_config, console, tmp_path,
+    ):
+        report_path = tmp_path / "r.json"
+        run = self._run_live(
+            org_config, team_config, console, report_path,
+            FakeJiraClient(fail_create_issue_after=0), _patch_prompts(),
+        )
+        assert run["error"]["type"] == "JiraApiError"
+        assert "simulated epic failure" in run["error"]["message"]
+
+    def test_builder_value_error_records_exception(
+        self, org_config, console, tmp_path,
+    ):
+        # sprint_group set, but no release_sprint_schedule entry for 1 release
+        team = TeamConfig(
+            project_key="TST",
+            team_name="TestTeam",
+            per_release_tickets=[
+                TicketTemplate(
+                    summary="Pre-reg {version}",
+                    fields={"issuetype": "Task"},
+                    sprint_group="pre",
+                ),
+            ],
+            release_sprint_schedule={2: [{"pre": 1}, {"pre": 2}]},
+        )
+        report_path = tmp_path / "r.json"
+        run = self._run_live(
+            org_config, team, console, report_path,
+            FakeJiraClient(), _patch_prompts(), expect=ValueError,
+        )
+        assert run["error"]["type"] == "ValueError"
+        assert "release_sprint_schedule" in run["error"]["message"]
+        assert run["ended_at"] is not None
+
+    def test_resume_from_legacy_report_without_error_succeeds(
+        self, org_config, team_config, console, tmp_path,
+    ):
+        prior_hash = compute_resolved_hash(
+            org_config, team_config, "PI28", ["26.1.1"],
+        )
+        legacy_path = tmp_path / "legacy.json"
+        legacy_path.write_text(json.dumps({
+            "schema_version": 1,
+            "run": {
+                "schema_version": 1,
+                "command": ["jiramator", "plan"],
+                "started_at": "2026-04-29T10:00:00+00:00",
+                "ended_at": None,
+                "team_config_path": "",
+                "org_config_path": "",
+                "team_name": "TestTeam",
+                "pi_label": "PI28",
+                "versions": ["26.1.1"],
+                "resolved_config_hash": prior_hash,
+                "status": "failed",
+                "counts": {"created": 1, "skipped": 0, "failed": 0},
+                "issues": [{
+                    "template_key": "epic:bau", "kind": "epic",
+                    "status": "created", "jira_key": "REAL-1",
+                    "error": None, "fields": [],
+                }],
+            },
+        }))
+        prior = RunReport.from_envelope(json.loads(legacy_path.read_text()))
+        assert prior.error is None
+
+        report_path = tmp_path / "r.json"
+        fake = FakeJiraClient()
+
+        def go():
+            with patch("jiramator.planner.JiraClient", return_value=fake):
+                run_plan(
+                    org_config, team_config,
+                    dry_run=False, console=console,
+                    report_path=report_path,
+                    prior_report=prior,
+                )
+
+        _run_with_patches(_patch_prompts(), go)
+        run = _read_report(report_path)["run"]
+        assert run["status"] == "success"
+        assert "error" not in run
+        assert len(fake.created) == 1  # bau resumed, only misc created
