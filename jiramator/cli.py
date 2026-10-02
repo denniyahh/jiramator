@@ -8,6 +8,7 @@ all real work to planner.py and importer.py.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -16,7 +17,7 @@ import click
 import requests
 from rich.console import Console
 
-from jiramator.config import load_org_config, load_team_config
+from jiramator.config import OrgConfig, load_org_config, load_team_config
 from jiramator.config_merge import merge_configs
 from jiramator.error_format import ConfigValidationError
 from jiramator.importer import (
@@ -32,6 +33,7 @@ from jiramator.run_report import (
     RunReport,
     compute_resolved_hash,
     default_report_path,
+    error_info,
     find_resumable,
     write_report_atomic,
 )
@@ -106,6 +108,25 @@ def _fail(message: str) -> None:
     """Print *message* to stderr (plain text, no Rich markup) and exit 1."""
     click.echo(message, err=True)
     sys.exit(1)
+
+
+def _record_import_failure(
+    report: RunReport, report_path: Path, exc: BaseException, org_config: OrgConfig,
+) -> None:
+    """Set ``ended_at``/``error`` (if unset) on an import report and persist it.
+
+    Write failures (``OSError``) are swallowed so the original exception is
+    what the user sees. ``exc`` is only read, never mutated.
+    """
+    if report.ended_at is None:
+        report.ended_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    if report.error is None:
+        token = os.environ.get(org_config.jira_token_env, "").strip()
+        report.error = error_info(exc, secrets=(token,) if token else ())
+    try:
+        write_report_atomic(report, report_path)
+    except OSError:
+        pass
 
 
 def _load_report_file(path: Path) -> RunReport:
@@ -660,13 +681,17 @@ def import_command(
             prior_report=prior_report,
         )
     except (ValueError, JiraApiError) as exc:
-        # Persist the (possibly partial) report before exiting.
-        report.ended_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
-        try:
-            write_report_atomic(report, report_path)
-        except OSError:
-            pass
+        # Persist the (possibly partial) report, with when/why it ended, before
+        # exiting. An error already recorded by run_import is kept.
+        _record_import_failure(report, report_path, exc, org_config)
         _fail(f"Import error: {exc}")
+    except BaseException as exc:
+        # Any other crash (e.g. a requests ConnectionError from get_fields, or
+        # Ctrl-C before run_import starts) still leaves a report with ended_at
+        # and error (INV-04), then propagates unchanged. A SystemExit raised by
+        # _fail in the clause above is not routed here.
+        _record_import_failure(report, report_path, exc, org_config)
+        raise
 
     # Finalize report status.
     report.ended_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")

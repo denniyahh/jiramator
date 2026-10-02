@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+import requests
 from click.testing import CliRunner
 
 from jiramator.cli import cli
@@ -238,6 +239,122 @@ class TestImportCommand:
         assert "duplicate summary already exists as CA-4999" in result.output
         assert "Row 2" in result.output
         assert "boom" in result.output
+
+    def test_live_import_connection_error_writes_report_with_error(
+        self,
+        runner: CliRunner,
+        monkeypatch: pytest.MonkeyPatch,
+        org_config_path: Path,
+        team_config_path: Path,
+        tmp_path: Path,
+    ):
+        sheet_path = tmp_path / "import.csv"
+        sheet_path.write_text("Summary\nRisk A\n")
+        monkeypatch.setattr(
+            "jiramator.cli.read_spreadsheet",
+            lambda *args, **kwargs: [{"Summary": "Risk A"}],
+        )
+        client = MagicMock()
+        client.get_fields.side_effect = requests.exceptions.ConnectionError("boom")
+        monkeypatch.setattr("jiramator.cli.JiraClient", lambda org_config: client)
+        report_path = tmp_path / "r.json"
+
+        result = runner.invoke(
+            cli,
+            [
+                "import",
+                "--org-config", str(org_config_path),
+                "--team-config", str(team_config_path),
+                "--report", str(report_path),
+                str(sheet_path),
+            ],
+        )
+
+        assert result.exit_code != 0
+        assert isinstance(result.exception, requests.exceptions.ConnectionError)
+        assert report_path.exists()
+        run = json.loads(report_path.read_text(encoding="utf-8"))["run"]
+        assert run["error"] == {"type": "ConnectionError", "message": "boom"}
+        assert run["ended_at"].endswith("Z")
+        assert run["status"] == "failed"
+
+    def test_live_import_credential_error_records_value_error(
+        self,
+        runner: CliRunner,
+        monkeypatch: pytest.MonkeyPatch,
+        org_config_path: Path,
+        team_config_path: Path,
+        tmp_path: Path,
+    ):
+        sheet_path = tmp_path / "import.csv"
+        sheet_path.write_text("Summary\nRisk A\n")
+        monkeypatch.setattr(
+            "jiramator.cli.read_spreadsheet",
+            lambda *args, **kwargs: [{"Summary": "Risk A"}],
+        )
+
+        def _raise(org_config):
+            raise ValueError("missing token")
+
+        monkeypatch.setattr("jiramator.cli.JiraClient", _raise)
+        report_path = tmp_path / "r.json"
+
+        result = runner.invoke(
+            cli,
+            [
+                "import",
+                "--org-config", str(org_config_path),
+                "--team-config", str(team_config_path),
+                "--report", str(report_path),
+                str(sheet_path),
+            ],
+        )
+
+        assert result.exit_code == 1
+        assert "Import error: missing token" in result.output
+        run = json.loads(report_path.read_text(encoding="utf-8"))["run"]
+        assert run["error"] == {"type": "ValueError", "message": "missing token"}
+        assert run["ended_at"] is not None
+
+    def test_live_import_inner_error_not_overwritten_by_cli(
+        self,
+        runner: CliRunner,
+        monkeypatch: pytest.MonkeyPatch,
+        org_config_path: Path,
+        team_config_path: Path,
+        tmp_path: Path,
+    ):
+        sheet_path = tmp_path / "import.csv"
+        sheet_path.write_text("Summary\nRisk A\n")
+        monkeypatch.setattr(
+            "jiramator.cli.read_spreadsheet",
+            lambda *args, **kwargs: [{"Summary": "Risk A"}],
+        )
+        client = MagicMock()
+        client.get_fields.return_value = []
+        monkeypatch.setattr("jiramator.cli.JiraClient", lambda org_config: client)
+
+        def _inner(*args, report=None, report_path=None, **kwargs):
+            report.error = {"type": "InnerError", "message": "from run_import"}
+            raise ValueError("outer")
+
+        monkeypatch.setattr("jiramator.cli.run_import", _inner)
+        report_path = tmp_path / "r.json"
+
+        result = runner.invoke(
+            cli,
+            [
+                "import",
+                "--org-config", str(org_config_path),
+                "--team-config", str(team_config_path),
+                "--report", str(report_path),
+                str(sheet_path),
+            ],
+        )
+
+        assert result.exit_code == 1
+        run = json.loads(report_path.read_text(encoding="utf-8"))["run"]
+        assert run["error"] == {"type": "InnerError", "message": "from run_import"}
 
 
 class TestUpdateCommand:

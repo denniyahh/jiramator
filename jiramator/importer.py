@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from jiramator.config import OrgConfig, TeamConfig
 from jiramator.field_resolver import ResolvedField, build_and_coerce_field_value, resolve_field_name
 from jiramator.jira_client import JiraApiError, JiraClient
-from jiramator.run_report import IssueResult, RunReport, write_report_atomic
+from jiramator.run_report import IssueResult, RunReport, error_info, write_report_atomic
 from jiramator.value_coercion import coerce_field_value, should_omit_value
 
 # Matches a Jira issue key like "CA-5079" — used to tell a Parent column
@@ -494,8 +496,16 @@ def run_import(
             created.append((result.row_number, result.summary, created_key))
             _record(tk, "created", jira_key=created_key)
             _persist()
-    except BaseException:
-        # Persist whatever we got before the exception (KeyboardInterrupt et al).
+    except BaseException as exc:
+        # Persist whatever we got before the exception (KeyboardInterrupt et
+        # al), recording when the run ended and why (INV-04). The exception is
+        # only read, then re-raised unchanged.
+        if report is not None:
+            if report.ended_at is None:
+                report.ended_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+            if report.error is None:
+                token = os.environ.get(org_config.jira_token_env, "").strip()
+                report.error = error_info(exc, secrets=(token,) if token else ())
         _persist()
         raise
 

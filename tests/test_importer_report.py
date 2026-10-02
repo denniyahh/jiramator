@@ -382,6 +382,10 @@ class TestPersistOnInterrupt:
         env = _read_report(report_path)
         run = env["run"]
         assert run["counts"]["created"] >= 1
+        # INV-04: end time (import "Z" format) and cause recorded before re-raise
+        assert run["ended_at"].endswith("Z")
+        assert run["error"]["type"] == "KeyboardInterrupt"
+        assert run["error"]["message"] == "simulated Ctrl-C"
 
 
 # ---------------------------------------------------------------------------
