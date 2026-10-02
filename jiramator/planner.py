@@ -25,6 +25,7 @@ the (unvalidated) preview rather than failing.
 """
 from __future__ import annotations
 
+import os
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -45,6 +46,7 @@ from jiramator.run_report import (
     IssueResult,
     RunReport,
     compute_resolved_hash,
+    error_info,
     write_report_atomic,
 )
 from jiramator.ticket_builder import _strip_template_key, build_all
@@ -658,6 +660,12 @@ def _display_results(
 # ---------------------------------------------------------------------------
 
 
+def _token_secrets(org_config: OrgConfig) -> tuple[str, ...]:
+    """Return the configured Jira token value (if set) for message redaction."""
+    token = os.environ.get(org_config.jira_token_env, "").strip()
+    return (token,) if token else ()
+
+
 def run_plan(
     org_config: OrgConfig,
     team_config: TeamConfig,
@@ -787,10 +795,17 @@ def run_plan(
             sprints_exist_override=sprints_exist_override,
             assume_yes=assume_yes,
         )
-    except BaseException:
+    except BaseException as exc:
         # Persist whatever state we got to before the exception (covers
-        # JiraApiError, KeyboardInterrupt, anything else). The atomic-write
+        # JiraApiError, KeyboardInterrupt, anything else), recording when the
+        # run ended and why (INV-04). An ``error`` already set by a deliberate
+        # abort site (reason before SystemExit) is kept, not overwritten. The
+        # exception is only read, then re-raised unchanged. The atomic-write
         # contract from Plan 03 guarantees no half-written JSON on disk.
+        if report.ended_at is None:
+            report.ended_at = datetime.now(UTC).isoformat()
+        if report.error is None:
+            report.error = error_info(exc, secrets=_token_secrets(org_config))
         _persist()
         raise
 
