@@ -825,7 +825,10 @@ def run_plan(
             report.ended_at = datetime.now(UTC).isoformat()
         if report.error is None:
             report.error = error_info(exc, secrets=credential_secrets(org_config))
-        _persist()
+        try:
+            _persist()
+        except OSError:
+            pass  # never mask/replace the original exception (P-01-01)
         raise
 
 

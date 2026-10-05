@@ -565,6 +565,32 @@ class TestPersistOnError:
             "type": "KeyboardInterrupt", "message": "simulated Ctrl-C",
         }
 
+    def test_p10b_failed_crash_write_does_not_mask_original(
+        self, org_config, team_config, console, tmp_path,
+    ):
+        """WR-06: an OSError from the crash-handler write is swallowed so
+        the original exception propagates unchanged (P-01-01)."""
+        from jiramator.run_report import write_report_atomic as real_write
+
+        def flaky_write(report, path):
+            if report.error is not None:
+                raise OSError("disk full")
+            real_write(report, path)
+
+        fake = FakeJiraClient(interrupt_create_issue_after=1)
+
+        def go():
+            with patch("jiramator.planner.JiraClient", return_value=fake), \
+                    patch("jiramator.planner.write_report_atomic", side_effect=flaky_write):
+                with pytest.raises(KeyboardInterrupt, match="simulated Ctrl-C"):
+                    run_plan(
+                        org_config, team_config,
+                        dry_run=False, console=console,
+                        report_path=tmp_path / "r.json",
+                    )
+
+        _run_with_patches(_patch_prompts(), go)
+
 
 # ---------------------------------------------------------------------------
 # INV-04: every plan exit path records a distinguishable run-level error

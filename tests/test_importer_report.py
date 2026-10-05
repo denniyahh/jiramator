@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -415,6 +415,32 @@ class TestPersistOnInterrupt:
         assert run["ended_at"].endswith("Z")
         assert run["error"]["type"] == "KeyboardInterrupt"
         assert run["error"]["message"] == "simulated Ctrl-C"
+
+    def test_i7b_failed_crash_write_does_not_mask_original(self, tmp_path):
+        """WR-06: an OSError from the crash-handler write is swallowed so
+        the original exception propagates unchanged (P-01-01)."""
+        from jiramator.run_report import write_report_atomic as real_write
+
+        def flaky_write(report, path):
+            if report.error is not None:
+                raise OSError("disk full")
+            real_write(report, path)
+
+        client = MagicMock()
+        client.find_issue_keys_by_summaries.return_value = {}
+        client.create_issue.side_effect = KeyboardInterrupt("simulated Ctrl-C")
+
+        with patch("jiramator.importer.write_report_atomic", side_effect=flaky_write):
+            with pytest.raises(KeyboardInterrupt, match="simulated Ctrl-C"):
+                run_import(
+                    [{"Summary": "A", "API Impact": "No"}],
+                    org_config=_org_config(),
+                    team_config=_team_config(),
+                    jira_fields=[],
+                    client=client,
+                    report=_new_report(),
+                    report_path=tmp_path / "r.json",
+                )
 
 
 # ---------------------------------------------------------------------------
