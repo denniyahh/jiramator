@@ -621,10 +621,22 @@ class TestErrorCapture:
             FakeJiraClient(),
             _patch_prompts(versions=("99.9.9",), confirm_yes=False),
         )
-        assert run["error"]["type"] == "Aborted"
-        assert "Cannot proceed without fix versions" in run["error"]["message"]
-        assert "99.9.9" in run["error"]["message"]
+        reason = "Cannot proceed without fix versions (declined creating: 99.9.9)."
+        assert run["error"] == {"type": "Aborted", "message": reason}
         assert run["ended_at"] is not None
+
+    def test_fix_version_decline_console_matches_report(
+        self, org_config, team_config, tmp_path,
+    ):
+        """WR-05: the recorded reason is exactly what the console printed."""
+        console = Console(stderr=True, no_color=True, force_terminal=False, record=True)
+        report_path = tmp_path / "r.json"
+        run = self._run_live(
+            org_config, team_config, console, report_path,
+            FakeJiraClient(),
+            _patch_prompts(versions=("99.9.9",), confirm_yes=False),
+        )
+        assert f"Aborted. {run['error']['message']}" in console.export_text()
 
     def test_credential_error_records_aborted_reason(
         self, org_config, team_config, console, tmp_path,
@@ -658,7 +670,12 @@ class TestErrorCapture:
             _RequiredFieldFake(), _patch_prompts(),
         )
         assert run["error"]["type"] == "Aborted"
-        assert "field problem" in run["error"]["message"]
+        msg = run["error"]["message"]
+        assert msg.startswith("Found ")
+        assert "field problem(s): " in msg
+        # WR-05: the specific problem (which field) is kept in the report.
+        assert "customfield_99999" in msg
+        assert msg.endswith("No tickets were created.")
         assert run["ended_at"] is not None
 
     def test_bulk_api_error_records_exception(
