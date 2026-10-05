@@ -8,7 +8,6 @@ all real work to planner.py and importer.py.
 from __future__ import annotations
 
 import json
-import os
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -32,6 +31,7 @@ from jiramator.run_report import (
     IssueResult,
     RunReport,
     compute_resolved_hash,
+    credential_secrets,
     default_report_path,
     error_info,
     find_resumable,
@@ -121,8 +121,7 @@ def _record_import_failure(
     if report.ended_at is None:
         report.ended_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
     if report.error is None:
-        token = os.environ.get(org_config.jira_token_env, "").strip()
-        report.error = error_info(exc, secrets=(token,) if token else ())
+        report.error = error_info(exc, secrets=credential_secrets(org_config))
     try:
         write_report_atomic(report, report_path)
     except OSError:

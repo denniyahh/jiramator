@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import os
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -13,7 +12,13 @@ from typing import Any
 from jiramator.config import OrgConfig, TeamConfig
 from jiramator.field_resolver import ResolvedField, build_and_coerce_field_value, resolve_field_name
 from jiramator.jira_client import JiraApiError, JiraClient
-from jiramator.run_report import IssueResult, RunReport, error_info, write_report_atomic
+from jiramator.run_report import (
+    IssueResult,
+    RunReport,
+    credential_secrets,
+    error_info,
+    write_report_atomic,
+)
 from jiramator.value_coercion import coerce_field_value, should_omit_value
 
 # Matches a Jira issue key like "CA-5079" — used to tell a Parent column
@@ -504,8 +509,9 @@ def run_import(
             if report.ended_at is None:
                 report.ended_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
             if report.error is None:
-                token = os.environ.get(org_config.jira_token_env, "").strip()
-                report.error = error_info(exc, secrets=(token,) if token else ())
+                report.error = error_info(
+                    exc, secrets=credential_secrets(org_config)
+                )
         _persist()
         raise
 
