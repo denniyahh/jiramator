@@ -6,10 +6,12 @@ Plan: 01-03 Task 1.
 
 from __future__ import annotations
 
+import base64
 import json
 import sys
 from dataclasses import asdict
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -21,6 +23,7 @@ from jiramator.run_report import (
     RunReport,
     abort_info,
     compute_resolved_hash,
+    credential_secrets,
     default_report_path,
     error_info,
     find_resumable,
@@ -261,6 +264,48 @@ class TestErrorInfo:
             "not marked critical (_ssl.c:1006)"
         )
         assert error_info(RuntimeError(msg))["message"] == msg
+        lower = "ssl error: basic constraints of ca cert not marked critical"
+        assert error_info(RuntimeError(lower))["message"] == lower
+
+    @pytest.mark.parametrize(
+        ("raw", "secret", "expected"),
+        [
+            (
+                "authorization: basic dXNlcjp0b2s=",
+                "dXNlcjp0b2s=",
+                "authorization: basic ***",
+            ),
+            ("header BEARER abc.def rejected", "abc.def", "header BEARER *** rejected"),
+            ("Authorization: Basic=dXNlcjp0b2s=", "dXNlcjp0b2s=", "Authorization: Basic=***"),
+            ("Authorization: Basic:dXNlcjp0b2s=", "dXNlcjp0b2s=", "Authorization: Basic:***"),
+            ("auth bearer\tabc123 x", "abc123", "auth bearer\t*** x"),
+            ("Basic  Constraintsabc", "Constraintsabc", "Basic  ***"),
+        ],
+    )
+    def test_32e_credential_scheme_any_case_and_separator_redacted(
+        self, raw, secret, expected
+    ):
+        msg = error_info(RuntimeError(raw))["message"]
+        assert secret not in msg
+        assert msg == expected
+
+    def test_32f_credential_secrets_include_basic_auth_b64(self, monkeypatch):
+        org = SimpleNamespace(jira_email_env="JM_E", jira_token_env="JM_T")
+        monkeypatch.delenv("JM_E", raising=False)
+        monkeypatch.delenv("JM_T", raising=False)
+        assert credential_secrets(org) == ()
+
+        monkeypatch.setenv("JM_T", " tok123 ")
+        assert credential_secrets(org) == ("tok123",)
+
+        monkeypatch.setenv("JM_E", "me@example.com")
+        b64 = base64.b64encode(b"me@example.com:tok123").decode()
+        assert credential_secrets(org) == ("tok123", b64)
+        # The b64 credential is redacted even without a scheme word nearby.
+        msg = error_info(
+            RuntimeError(f"echoed {b64} back"), secrets=credential_secrets(org)
+        )["message"]
+        assert b64 not in msg
 
     def test_32b_redaction_before_truncation(self):
         secret = "S" * 50

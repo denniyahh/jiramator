@@ -16,6 +16,7 @@ Public surface (Plan 04 callers depend on these names verbatim):
 - ``compute_resolved_hash`` — sha256(canonical-json) of (org, team, pi, versions).
 - ``error_info`` / ``abort_info`` — build the sanitized run-level ``error``
   record (``{"type", "message"}``) for crashes and deliberate aborts (INV-04).
+- ``credential_secrets`` — the literal credential values to redact.
 - ``ABORTED_ERROR_TYPE`` — the stable ``error.type`` label for deliberate aborts.
 
 Stdlib only — no external imports.
@@ -23,6 +24,7 @@ Stdlib only — no external imports.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -176,12 +178,42 @@ class RunReport:
 # ---------------------------------------------------------------------------
 
 # ``Basic``/``Bearer`` scheme followed by a credential token (Authorization
-# header text echoed into an exception message). The scheme word is kept.
+# header text echoed into an exception message). The scheme word and its
+# separator are kept. Auth schemes are case-insensitive (RFC 7235), and the
+# separator may be whitespace, ``:`` or ``=`` (``Basic=<b64>``). The token's
+# first character excludes the separator set so backtracking can't shift
+# the token start past the exemption below.
 # The OpenSSL TLS diagnostic "Basic Constraints of CA cert not marked
 # critical" (see README Troubleshooting / JIRAMATOR_RELAX_TLS_STRICT) is
 # exempt: "Constraints" is never a credential, and that keyword is what
 # identifies the corporate-TLS failure in a recorded report.
-_AUTH_CREDENTIAL_RE = re.compile(r"\b(Basic|Bearer)\s+(?!Constraints\b)[^\s'\",;]+")
+_AUTH_CREDENTIAL_RE = re.compile(
+    r"\b(basic|bearer)([\s:=]+)(?!constraints\b)[^\s'\",;:=][^\s'\",;]*",
+    re.IGNORECASE,
+)
+
+
+def credential_secrets(org_config: OrgConfig) -> tuple[str, ...]:
+    """Return literal credential values to redact from recorded messages.
+
+    Includes the configured Jira token and, when the email is also set, the
+    Basic-auth credential ``base64(email:token)`` that ``requests`` sends —
+    the form most likely to be echoed into an exception message.
+
+    Args:
+        org_config: Org config naming the email/token env vars.
+
+    Returns:
+        Non-empty secret strings (possibly an empty tuple).
+    """
+    token = os.environ.get(org_config.jira_token_env, "").strip()
+    if not token:
+        return ()
+    email = os.environ.get(org_config.jira_email_env, "").strip()
+    if not email:
+        return (token,)
+    basic = base64.b64encode(f"{email}:{token}".encode("latin-1", "replace")).decode()
+    return (token, basic)
 
 
 def _sanitize_message(message: str, secrets: Iterable[str]) -> str:
@@ -189,14 +221,15 @@ def _sanitize_message(message: str, secrets: Iterable[str]) -> str:
 
     Redaction runs BEFORE truncation so a cut can never expose a prefix of a
     token. Every non-empty value in ``secrets`` is replaced with ``***``,
-    then any ``Basic``/``Bearer`` credential becomes ``<scheme> ***``.
+    then any ``Basic``/``Bearer`` credential (any case, separated by
+    whitespace, ``:`` or ``=``) becomes ``<scheme><separator>***``.
     The cap is measured in ``str`` length (code points); longer messages are
     cut to ``_ERROR_MESSAGE_CAP`` code points plus a trailing ``…``.
     """
     for secret in secrets:
         if secret:
             message = message.replace(secret, "***")
-    message = _AUTH_CREDENTIAL_RE.sub(r"\1 ***", message)
+    message = _AUTH_CREDENTIAL_RE.sub(r"\1\2***", message)
     if len(message) > _ERROR_MESSAGE_CAP:
         message = message[:_ERROR_MESSAGE_CAP] + "…"
     return message

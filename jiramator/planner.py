@@ -25,7 +25,6 @@ the (unvalidated) preview rather than failing.
 """
 from __future__ import annotations
 
-import os
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -47,6 +46,7 @@ from jiramator.run_report import (
     RunReport,
     abort_info,
     compute_resolved_hash,
+    credential_secrets,
     error_info,
     write_report_atomic,
 )
@@ -674,12 +674,6 @@ def _display_results(
 # ---------------------------------------------------------------------------
 
 
-def _token_secrets(org_config: OrgConfig) -> tuple[str, ...]:
-    """Return the configured Jira token value (if set) for message redaction."""
-    token = os.environ.get(org_config.jira_token_env, "").strip()
-    return (token,) if token else ()
-
-
 def run_plan(
     org_config: OrgConfig,
     team_config: TeamConfig,
@@ -819,7 +813,7 @@ def run_plan(
         if report.ended_at is None:
             report.ended_at = datetime.now(UTC).isoformat()
         if report.error is None:
-            report.error = error_info(exc, secrets=_token_secrets(org_config))
+            report.error = error_info(exc, secrets=credential_secrets(org_config))
         _persist()
         raise
 
@@ -899,7 +893,7 @@ def _run_plan_inner(
         return
 
     # -- Step 7: Resolve credentials and build client -----------------------
-    secrets = _token_secrets(org_config)
+    secrets = credential_secrets(org_config)
     try:
         client = JiraClient(org_config)
     except ValueError as exc:
