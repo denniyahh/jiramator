@@ -493,6 +493,30 @@ class TestPlanCommandErrors:
         assert "Resume report incompatible" in result.stderr
         assert "kwargs" not in stub_run_plan
 
+    def test_C14b_resume_malformed_issues_exits_1_without_traceback(
+        self,
+        runner: CliRunner,
+        stub_run_plan: dict[str, Any],
+        org_config_path: Path,
+        team_config_path: Path,
+        tmp_path: Path,
+    ) -> None:
+        bad = tmp_path / "bad.json"
+        bad.write_text(
+            json.dumps({"schema_version": 1, "run": {"issues": ["bad"]}}),
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(
+            cli,
+            _plan_args(org_config_path, team_config_path, "--resume", str(bad)),
+        )
+
+        assert result.exit_code == 1
+        assert not isinstance(result.exception, AttributeError)
+        assert "Resume report incompatible" in result.stderr
+        assert "kwargs" not in stub_run_plan
+
 
 # ---------------------------------------------------------------------------
 # Task 2 — import command flag wiring (CI1-CI6)
