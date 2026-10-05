@@ -15,7 +15,8 @@ All notable changes to Jiramator are documented here. This project adheres to
   exception or a deliberate abort, the run report now records `ended_at` and an
   `error` object (`type`, `message`) before the error propagates. Secrets are
   redacted from that message and from the per-issue `error` strings in the
-  same `plan`/`import` report. The configured Jira token, its Basic-auth
+  same `plan`/`import` report, and from the per-row `error` strings in the
+  `update` report. The configured Jira token, its Basic-auth
   `base64(email:token)` form, and any `Basic`/`Bearer` credential (scheme in
   any case, followed by whitespace, `:` or `=`) become `***`. The TLS
   diagnostic "Basic Constraints of CA cert not marked critical" is left
