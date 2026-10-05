@@ -177,7 +177,11 @@ class RunReport:
 
 # ``Basic``/``Bearer`` scheme followed by a credential token (Authorization
 # header text echoed into an exception message). The scheme word is kept.
-_AUTH_CREDENTIAL_RE = re.compile(r"\b(Basic|Bearer)\s+[^\s'\",;]+")
+# The OpenSSL TLS diagnostic "Basic Constraints of CA cert not marked
+# critical" (see README Troubleshooting / JIRAMATOR_RELAX_TLS_STRICT) is
+# exempt: "Constraints" is never a credential, and that keyword is what
+# identifies the corporate-TLS failure in a recorded report.
+_AUTH_CREDENTIAL_RE = re.compile(r"\b(Basic|Bearer)\s+(?!Constraints\b)[^\s'\",;]+")
 
 
 def _sanitize_message(message: str, secrets: Iterable[str]) -> str:

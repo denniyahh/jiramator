@@ -255,6 +255,13 @@ class TestErrorInfo:
         plain = error_info(RuntimeError("nothing secret"), secrets=("",))
         assert plain["message"] == "nothing secret"
 
+    def test_32d_basic_constraints_tls_error_not_redacted(self):
+        msg = (
+            "certificate verify failed: Basic Constraints of CA cert "
+            "not marked critical (_ssl.c:1006)"
+        )
+        assert error_info(RuntimeError(msg))["message"] == msg
+
     def test_32b_redaction_before_truncation(self):
         secret = "S" * 50
         msg = "x" * (_ERROR_MESSAGE_CAP - 10) + secret
