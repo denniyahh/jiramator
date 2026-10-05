@@ -516,7 +516,10 @@ def run_import(
                 report.ended_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
             if report.error is None:
                 report.error = error_info(exc, secrets=secrets)
-        _persist()
+        try:
+            _persist()
+        except OSError:
+            pass  # never mask/replace the original exception (P-01-01)
         raise
 
     return ImportRunResult(
