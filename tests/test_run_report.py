@@ -137,6 +137,22 @@ class TestEnvelopeRoundTrip:
         assert r.issues[0].template_key == "a"
         assert "future_issue_key" not in asdict(r.issues[0])
 
+    @pytest.mark.parametrize(
+        "envelope",
+        [
+            {"schema_version": 1, "run": {"issues": ["bad"]}},
+            {"schema_version": 1, "run": {"issues": [None]}},
+            {"schema_version": 1, "run": {"issues": {"a": {}}}},
+            {"schema_version": 1, "run": {"issues": "x"}},
+            {"schema_version": 1, "run": {"error": "boom"}},
+            {"schema_version": 1, "run": ["not", "a", "dict"]},
+            ["not", "an", "envelope"],
+        ],
+    )
+    def test_28b_malformed_shape_raises_value_error(self, envelope):
+        with pytest.raises(ValueError):
+            RunReport.from_envelope(envelope)
+
     def test_29_error_omitted_when_none(self):
         assert "error" not in RunReport().to_envelope()["run"]
 

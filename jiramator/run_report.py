@@ -154,9 +154,14 @@ class RunReport:
 
         Raises:
             ValueError: When ``schema_version != SCHEMA_VERSION`` or the
-                envelope shape is missing the expected keys. The message
-                names both the rejected version and the supported one.
+                envelope shape is wrong (non-object envelope/``run``,
+                ``run.issues`` not a list of objects, ``run.error`` not an
+                object). The version message names both the rejected
+                version and the supported one.
+            KeyError: When the ``run`` key is missing.
         """
+        if not isinstance(obj, dict):
+            raise ValueError("run report envelope must be a JSON object")
         if obj.get("schema_version") != SCHEMA_VERSION:
             raise ValueError(
                 f"Unsupported run report schema_version: {obj.get('schema_version')}; "
@@ -166,10 +171,23 @@ class RunReport:
         # (additive optional keys) still load instead of raising TypeError.
         run_names = {f.name for f in fields(cls)}
         issue_names = {f.name for f in fields(IssueResult)}
-        run = {k: v for k, v in dict(obj["run"]).items() if k in run_names}
+        raw_run = obj["run"]
+        if not isinstance(raw_run, dict):
+            raise ValueError("run report 'run' must be an object")
+        run = {k: v for k, v in raw_run.items() if k in run_names}
+        # Validate shapes so a damaged/hand-edited report raises ValueError
+        # (which callers catch) rather than AttributeError.
+        raw_issues = run.get("issues", [])
+        if not isinstance(raw_issues, list) or not all(
+            isinstance(i, dict) for i in raw_issues
+        ):
+            raise ValueError("run report 'run.issues' must be a list of objects")
+        raw_error = run.get("error")
+        if raw_error is not None and not isinstance(raw_error, dict):
+            raise ValueError("run report 'run.error' must be an object or null")
         run["issues"] = [
             IssueResult(**{k: v for k, v in i.items() if k in issue_names})
-            for i in run.get("issues", [])
+            for i in raw_issues
         ]
         return cls(**run)
 
