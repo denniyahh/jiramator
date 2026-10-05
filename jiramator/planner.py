@@ -33,6 +33,7 @@ from typing import Any
 
 import requests
 from rich.console import Console
+from rich.markup import escape
 from rich.prompt import Confirm, IntPrompt, Prompt
 from rich.table import Table
 
@@ -289,12 +290,14 @@ def _check_and_create_fix_versions(
     *,
     assume_yes: bool = False,
     report: RunReport | None = None,
+    secrets: tuple[str, ...] = (),
 ) -> None:
     """Check existing fix versions and create any that are missing.
 
     Prompts the user for confirmation before creating, unless ``assume_yes``
     is set (non-interactive callers). When ``report`` is given, a decline
-    records the abort reason in ``report.error`` before exiting.
+    records the abort reason in ``report.error`` before exiting — the same
+    text printed after "Aborted." — with ``secrets`` redacted.
 
     Raises:
         SystemExit: If the user declines to create missing versions.
@@ -316,12 +319,14 @@ def _check_and_create_fix_versions(
     if not assume_yes and not Confirm.ask(
         "Create these fix versions?", default=False, console=console
     ):
-        console.print("[red]Aborted.[/] Cannot proceed without fix versions.")
+        # One reason string for both console and report (INV-04).
+        reason = (
+            "Cannot proceed without fix versions (declined creating: "
+            + ", ".join(missing) + ")."
+        )
+        console.print(f"[red]Aborted.[/] {escape(reason)}")
         if report is not None:
-            report.error = abort_info(
-                "Cannot proceed without fix versions: user declined creating "
-                + ", ".join(missing)
-            )
+            report.error = abort_info(reason, secrets=secrets)
         sys.exit(1)
 
     for name in missing:
@@ -479,6 +484,7 @@ def _preflight_validate(
     *,
     persist,
     report: RunReport | None = None,
+    secrets: tuple[str, ...] = (),
 ) -> None:
     """Best-effort field validation gate, shared by dry-run and live-run.
 
@@ -512,8 +518,12 @@ def _preflight_validate(
         "No tickets were created."
     )
     if report is not None:
+        # Keep the problem list: the report alone must say which fields were
+        # wrong (INV-04). abort_info's cap bounds the size.
         report.error = abort_info(
-            f"Found {len(problems)} field problem(s); no tickets were created."
+            f"Found {len(problems)} field problem(s): " + "; ".join(problems)
+            + ". No tickets were created.",
+            secrets=secrets,
         )
     persist()
     sys.exit(1)
@@ -885,6 +895,7 @@ def _run_plan_inner(
             _preflight_validate(
                 validation_client, team_config.project_key, all_payloads,
                 console, persist=persist, report=report,
+                secrets=credential_secrets(org_config),
             )
 
         console.print("\n[yellow]── Dry run ── no tickets created.[/]")
@@ -904,7 +915,7 @@ def _run_plan_inner(
 
     _preflight_validate(
         client, team_config.project_key, all_payloads, console,
-        persist=persist, report=report,
+        persist=persist, report=report, secrets=secrets,
     )
 
     # -- Step 8: Fix versions -----------------------------------------------
@@ -920,7 +931,7 @@ def _run_plan_inner(
     console.print()
     _check_and_create_fix_versions(
         client, team_config.project_key, needed_versions, console,
-        assume_yes=assume_yes, report=report,
+        assume_yes=assume_yes, report=report, secrets=secrets,
     )
 
     # -- Step 9: Duplicate warning + confirm --------------------------------
