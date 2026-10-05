@@ -684,6 +684,39 @@ class TestErrorCapture:
         assert run["error"]["type"] == "JiraApiError"
         assert "simulated epic failure" in run["error"]["message"]
 
+    @pytest.mark.parametrize(
+        "fake_kwargs", [{"fail_create_issue_after": 0}, {"fail_bulk": True}],
+        ids=["epic", "bulk"],
+    )
+    def test_token_absent_from_whole_report_on_api_error(
+        self, org_config, team_config, console, tmp_path, monkeypatch, fake_kwargs,
+    ):
+        """WR-03: per-issue ``error`` strings are redacted like ``run.error``."""
+        secret = "tok-SECRET-123456"
+        monkeypatch.setenv(org_config.jira_email_env, "me@example.com")
+        monkeypatch.setenv(org_config.jira_token_env, secret)
+
+        class _LeakyFake(FakeJiraClient):
+            def create_issue(self, payload):
+                if self._fail_create_after is not None:
+                    raise JiraApiError(f"401 token {secret} rejected", status_code=401)
+                return super().create_issue(payload)
+
+            def create_issues_bulk(self, payloads):
+                if self._fail_bulk:
+                    raise JiraApiError(f"401 token {secret} rejected", status_code=401)
+                return super().create_issues_bulk(payloads)
+
+        report_path = tmp_path / "r.json"
+        run = self._run_live(
+            org_config, team_config, console, report_path,
+            _LeakyFake(**fake_kwargs), _patch_prompts(),
+        )
+        failed = [i for i in run["issues"] if i["status"] == "failed"]
+        assert failed
+        assert all(i["error"] == "401 token *** rejected" for i in failed)
+        assert secret not in report_path.read_text(encoding="utf-8")
+
     def test_builder_value_error_records_exception(
         self, org_config, console, tmp_path,
     ):

@@ -16,7 +16,8 @@ Public surface (Plan 04 callers depend on these names verbatim):
 - ``compute_resolved_hash`` — sha256(canonical-json) of (org, team, pi, versions).
 - ``error_info`` / ``abort_info`` — build the sanitized run-level ``error``
   record (``{"type", "message"}``) for crashes and deliberate aborts (INV-04).
-- ``credential_secrets`` — the literal credential values to redact.
+- ``credential_secrets`` / ``sanitize_message`` — redaction for any recorded
+  message (run-level ``error`` and per-issue ``IssueResult.error``).
 - ``ABORTED_ERROR_TYPE`` — the stable ``error.type`` label for deliberate aborts.
 
 Stdlib only — no external imports.
@@ -216,8 +217,12 @@ def credential_secrets(org_config: OrgConfig) -> tuple[str, ...]:
     return (token, basic)
 
 
-def _sanitize_message(message: str, secrets: Iterable[str]) -> str:
+def sanitize_message(message: str, *, secrets: Iterable[str] = ()) -> str:
     """Redact secrets from ``message`` and cap its length.
+
+    Used for the run-level ``error`` record and for every per-issue
+    ``IssueResult.error`` string, so no field of a written report carries an
+    unredacted credential.
 
     Redaction runs BEFORE truncation so a cut can never expose a prefix of a
     token. Every non-empty value in ``secrets`` is replaced with ``***``,
@@ -250,7 +255,7 @@ def error_info(exc: BaseException, *, secrets: Iterable[str] = ()) -> dict[str, 
     """
     return {
         "type": type(exc).__name__,
-        "message": _sanitize_message(str(exc), secrets),
+        "message": sanitize_message(str(exc), secrets=secrets),
     }
 
 
@@ -266,7 +271,7 @@ def abort_info(reason: str, *, secrets: Iterable[str] = ()) -> dict[str, str]:
     """
     return {
         "type": ABORTED_ERROR_TYPE,
-        "message": _sanitize_message(reason, secrets),
+        "message": sanitize_message(reason, secrets=secrets),
     }
 
 
