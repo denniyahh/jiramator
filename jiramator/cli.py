@@ -35,6 +35,7 @@ from jiramator.run_report import (
     default_report_path,
     error_info,
     find_resumable,
+    sanitize_message,
     write_report_atomic,
 )
 from jiramator.spreadsheet import read_spreadsheet
@@ -180,8 +181,13 @@ def _update_report_from_result(
     ended_at: str,
     spreadsheet_path: Path,
     org_config_path: Path,
+    secrets: tuple[str, ...] = (),
 ) -> RunReport:
-    """Build a persistent run report for a bulk-update result."""
+    """Build a persistent run report for a bulk-update result.
+
+    Every per-row ``error`` string is passed through ``sanitize_message`` so
+    the update report gets the same redaction + cap as ``plan``/``import``.
+    """
     updated_fields_by_row: dict[int, list[str]] = {}
     for row_result in result.preview.row_results:
         if row_result.payload is None:
@@ -225,7 +231,7 @@ def _update_report_from_result(
                 kind="updated",
                 status="skipped",
                 jira_key=issue_key or None,
-                error=reason,
+                error=sanitize_message(reason, secrets=secrets),
                 fields=updated_fields_by_row.get(row_number, []),
             )
         )
@@ -236,7 +242,7 @@ def _update_report_from_result(
                 kind="updated",
                 status="failed",
                 jira_key=issue_key or None,
-                error=error,
+                error=sanitize_message(error, secrets=secrets),
                 fields=updated_fields_by_row.get(row_number, []),
             )
         )
@@ -861,6 +867,7 @@ def update_command(
         ended_at=ended_at,
         spreadsheet_path=spreadsheet_path,
         org_config_path=resolved_org_path,
+        secrets=credential_secrets(org_config),
     )
     write_report_atomic(report, report_path)
 

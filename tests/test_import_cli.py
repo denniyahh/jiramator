@@ -464,6 +464,49 @@ class TestUpdateCommand:
         assert run["issues"][0]["jira_key"] == "CA-1"
         assert run["issues"][0]["fields"] == ["customfield_14823"]
 
+    def test_live_run_redacts_credentials_in_update_report(
+        self,
+        runner: CliRunner,
+        monkeypatch: pytest.MonkeyPatch,
+        org_config_path: Path,
+        tmp_path: Path,
+    ) -> None:
+        token = "update-secret-token-1234"
+        monkeypatch.setenv("JIRA_EMAIL", "user@example.com")
+        monkeypatch.setenv("JIRA_TOKEN", token)
+        sheet_path = tmp_path / "update.csv"
+        sheet_path.write_text("Key,Platform\nCA-1,Calcs\nCA-2,Calcs\n")
+        report_path = tmp_path / "update-report.json"
+        rows = [{"Key": "CA-1", "Platform": "Calcs"}, {"Key": "CA-2", "Platform": "Calcs"}]
+
+        client = MagicMock()
+        client.get_fields.return_value = []
+        monkeypatch.setattr("jiramator.cli.JiraClient", lambda org_config: client)
+        monkeypatch.setattr("jiramator.cli.read_spreadsheet", lambda *args, **kwargs: rows)
+
+        result_obj = MagicMock(
+            preview=MagicMock(row_results=[]),
+            updated=[],
+            skipped=[(2, "CA-2", f"skipped with {token}")],
+            failed=[(1, "CA-1", f"Jira said: authorization: basic dXNlcjp0b2s= and {token}")],
+        )
+        monkeypatch.setattr("jiramator.cli.run_update", lambda *args, **kwargs: result_obj)
+        monkeypatch.setattr("jiramator.cli.render_update_preview_report", lambda *args, **kwargs: "UPDATE PREVIEW")
+        monkeypatch.setattr("jiramator.cli.render_update_execution_report", lambda *args, **kwargs: "UPDATE EXECUTION")
+
+        result = runner.invoke(
+            cli,
+            ["update", "--org-config", str(org_config_path), "--report", str(report_path), str(sheet_path)],
+        )
+
+        assert result.exit_code == 1
+        raw = report_path.read_text(encoding="utf-8")
+        assert token not in raw
+        assert "dXNlcjp0b2s=" not in raw
+        errors = {i["jira_key"]: i["error"] for i in json.loads(raw)["run"]["issues"]}
+        assert errors["CA-1"] == "Jira said: authorization: basic *** and ***"
+        assert errors["CA-2"] == "skipped with ***"
+
     def test_duplicate_keys_exit_before_jira_client(
         self,
         runner: CliRunner,
