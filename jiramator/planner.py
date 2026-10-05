@@ -48,6 +48,7 @@ from jiramator.run_report import (
     compute_resolved_hash,
     credential_secrets,
     error_info,
+    sanitize_message,
     write_report_atomic,
 )
 from jiramator.ticket_builder import _strip_template_key, build_all
@@ -972,7 +973,8 @@ def _run_plan_inner(
                 report.issues.append(
                     IssueResult(
                         template_key=tk, kind="epic",
-                        status="failed", error=str(exc),
+                        status="failed",
+                        error=sanitize_message(str(exc), secrets=secrets),
                     )
                 )
                 report.counts["failed"] = report.counts.get("failed", 0) + 1
@@ -1106,7 +1108,8 @@ def _bulk_create_with_resume(
             report.issues.append(
                 IssueResult(
                     template_key=tk, kind=kind,  # type: ignore[arg-type]
-                    status="failed", error=str(exc),
+                    status="failed",
+                    error=sanitize_message(str(exc), secrets=secrets),
                 )
             )
             report.counts["failed"] = report.counts.get("failed", 0) + 1

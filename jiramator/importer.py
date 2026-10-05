@@ -17,6 +17,7 @@ from jiramator.run_report import (
     RunReport,
     credential_secrets,
     error_info,
+    sanitize_message,
     write_report_atomic,
 )
 from jiramator.value_coercion import coerce_field_value, should_omit_value
@@ -321,9 +322,14 @@ def run_import(
         if report is not None and report_path is not None:
             write_report_atomic(report, report_path)
 
+    secrets = credential_secrets(org_config)
+
     def _record(tk: str, status: str, **kw: Any) -> None:
         if report is None:
             return
+        if kw.get("error"):
+            # Same redaction + cap as run.error (INV-04 / WR-03).
+            kw["error"] = sanitize_message(kw["error"], secrets=secrets)
         report.issues.append(
             IssueResult(template_key=tk, kind="imported", status=status, **kw)  # type: ignore[arg-type]
         )
@@ -509,9 +515,7 @@ def run_import(
             if report.ended_at is None:
                 report.ended_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
             if report.error is None:
-                report.error = error_info(
-                    exc, secrets=credential_secrets(org_config)
-                )
+                report.error = error_info(exc, secrets=secrets)
         _persist()
         raise
 

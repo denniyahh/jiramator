@@ -338,6 +338,35 @@ class TestResume:
         assert run["counts"]["created"] == 1
         assert run["counts"]["failed"] == 1
 
+    def test_i6b_row_error_redacts_token(self, tmp_path, monkeypatch):
+        """WR-03: a failed row's ``error`` is redacted like ``run.error``."""
+        secret = "tok-SECRET-123456"
+        org = _org_config()
+        monkeypatch.setenv(org.jira_email_env, "me@example.com")
+        monkeypatch.setenv(org.jira_token_env, secret)
+
+        client = MagicMock()
+        client.find_issue_keys_by_summaries.return_value = {}
+        client.create_issue.side_effect = [
+            JiraApiError(f"401 Authorization: Basic xyz token {secret}", status_code=401)
+        ]
+        report_path = tmp_path / "r.json"
+
+        run_import(
+            [{"Summary": "New", "API Impact": "No"}],
+            org_config=org,
+            team_config=_team_config(),
+            jira_fields=[],
+            client=client,
+            report=_new_report(),
+            report_path=report_path,
+        )
+
+        run = _read_report(report_path)["run"]
+        assert run["issues"][0]["status"] == "failed"
+        assert run["issues"][0]["error"] == "401 Authorization: Basic *** token ***"
+        assert secret not in report_path.read_text(encoding="utf-8")
+
 
 # ---------------------------------------------------------------------------
 # I7: persist on KeyboardInterrupt

@@ -14,8 +14,12 @@ All notable changes to Jiramator are documented here. This project adheres to
 - **Run reports record why a run stopped.** When `plan` or `import` exits on an
   exception or a deliberate abort, the run report now records `ended_at` and an
   `error` object (`type`, `message`) before the error propagates. Secrets are
-  redacted from the message (the configured Jira token and any `Basic`/`Bearer`
-  credential become `***`) and it is capped at 2,000 characters. Deliberate
+  redacted from that message and from the per-issue `error` strings in the
+  same `plan`/`import` report. The configured Jira token, its Basic-auth
+  `base64(email:token)` form, and any `Basic`/`Bearer` credential (scheme in
+  any case, followed by whitespace, `:` or `=`) become `***`. The TLS
+  diagnostic "Basic Constraints of CA cert not marked critical" is left
+  intact. Each recorded message is capped at 2,000 characters. Deliberate
   aborts (declining a confirmation, a credential error, field-validation
   problems, declining fix-version creation) use type `Aborted` with the reason
   shown on screen. Exit codes and console output are unchanged. Older reports
