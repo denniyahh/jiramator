@@ -22,8 +22,12 @@ All notable changes to Jiramator are documented here. This project adheres to
   diagnostic "Basic Constraints of CA cert not marked critical" is left
   intact. Each recorded message is capped at 2,000 characters. Deliberate
   aborts (declining a confirmation, a credential error, field-validation
-  problems, declining fix-version creation) use type `Aborted` with the reason
-  shown on screen. Exit codes and console output are unchanged. Older reports
+  problems, declining fix-version creation) use type `Aborted` with a readable
+  reason; declining the final ticket-creation confirmation records "User
+  declined ticket creation at the final confirmation." Exit codes are
+  unchanged. Console output is unchanged except that declining fix-version
+  creation now names the declined versions ("Aborted. Cannot proceed without
+  fix versions (declined creating: …)."). Older reports
   still load and `--resume` still works; reports from clean runs carry no
   `error` key. Caveat: a report written by 1.2.9 or later for a crashed or
   aborted run contains `error` and cannot be resumed by 1.2.8 or earlier.
