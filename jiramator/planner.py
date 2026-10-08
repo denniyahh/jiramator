@@ -33,6 +33,7 @@ from typing import Any
 
 import requests
 from rich.console import Console
+from rich.markup import escape
 from rich.prompt import Confirm, IntPrompt, Prompt
 from rich.table import Table
 
@@ -44,7 +45,11 @@ from jiramator.run_report import (
     ConfigDriftError,
     IssueResult,
     RunReport,
+    abort_info,
     compute_resolved_hash,
+    credential_secrets,
+    error_info,
+    sanitize_message,
     write_report_atomic,
 )
 from jiramator.ticket_builder import _strip_template_key, build_all
@@ -284,11 +289,15 @@ def _check_and_create_fix_versions(
     console: Console,
     *,
     assume_yes: bool = False,
+    report: RunReport | None = None,
+    secrets: tuple[str, ...] = (),
 ) -> None:
     """Check existing fix versions and create any that are missing.
 
     Prompts the user for confirmation before creating, unless ``assume_yes``
-    is set (non-interactive callers).
+    is set (non-interactive callers). When ``report`` is given, a decline
+    records the abort reason in ``report.error`` before exiting — the same
+    text printed after "Aborted." — with ``secrets`` redacted.
 
     Raises:
         SystemExit: If the user declines to create missing versions.
@@ -310,7 +319,14 @@ def _check_and_create_fix_versions(
     if not assume_yes and not Confirm.ask(
         "Create these fix versions?", default=False, console=console
     ):
-        console.print("[red]Aborted.[/] Cannot proceed without fix versions.")
+        # One reason string for both console and report (INV-04).
+        reason = (
+            "Cannot proceed without fix versions (declined creating: "
+            + ", ".join(missing) + ")."
+        )
+        console.print(f"[red]Aborted.[/] {escape(reason)}")
+        if report is not None:
+            report.error = abort_info(reason, secrets=secrets)
         sys.exit(1)
 
     for name in missing:
@@ -467,6 +483,8 @@ def _preflight_validate(
     console: Console,
     *,
     persist,
+    report: RunReport | None = None,
+    secrets: tuple[str, ...] = (),
 ) -> None:
     """Best-effort field validation gate, shared by dry-run and live-run.
 
@@ -475,7 +493,8 @@ def _preflight_validate(
     a warning is printed and the caller proceeds as if nothing were checked.
     Real field problems (missing required fields, ADF mismatches, invalid
     select values) are a hard stop in both modes: they're printed and the
-    process exits(1) before anything is created.
+    process exits(1) before anything is created; when ``report`` is given
+    the abort reason is recorded in ``report.error`` before persisting.
     """
     console.print("\n[bold]Validating ticket fields against Jira...[/]")
     try:
@@ -498,6 +517,14 @@ def _preflight_validate(
         "\n[red bold]Aborting[/] — fix the issues above before creating tickets. "
         "No tickets were created."
     )
+    if report is not None:
+        # Keep the problem list: the report alone must say which fields were
+        # wrong (INV-04). abort_info's cap bounds the size.
+        report.error = abort_info(
+            f"Found {len(problems)} field problem(s): " + "; ".join(problems)
+            + ". No tickets were created.",
+            secrets=secrets,
+        )
     persist()
     sys.exit(1)
 
@@ -787,11 +814,21 @@ def run_plan(
             sprints_exist_override=sprints_exist_override,
             assume_yes=assume_yes,
         )
-    except BaseException:
+    except BaseException as exc:
         # Persist whatever state we got to before the exception (covers
-        # JiraApiError, KeyboardInterrupt, anything else). The atomic-write
+        # JiraApiError, KeyboardInterrupt, anything else), recording when the
+        # run ended and why (INV-04). An ``error`` already set by a deliberate
+        # abort site (reason before SystemExit) is kept, not overwritten. The
+        # exception is only read, then re-raised unchanged. The atomic-write
         # contract from Plan 03 guarantees no half-written JSON on disk.
-        _persist()
+        if report.ended_at is None:
+            report.ended_at = datetime.now(UTC).isoformat()
+        if report.error is None:
+            report.error = error_info(exc, secrets=credential_secrets(org_config))
+        try:
+            _persist()
+        except OSError:
+            pass  # never mask/replace the original exception (P-01-01)
         raise
 
 
@@ -860,7 +897,8 @@ def _run_plan_inner(
         if validation_client is not None:
             _preflight_validate(
                 validation_client, team_config.project_key, all_payloads,
-                console, persist=persist,
+                console, persist=persist, report=report,
+                secrets=credential_secrets(org_config),
             )
 
         console.print("\n[yellow]── Dry run ── no tickets created.[/]")
@@ -870,14 +908,17 @@ def _run_plan_inner(
         return
 
     # -- Step 7: Resolve credentials and build client -----------------------
+    secrets = credential_secrets(org_config)
     try:
         client = JiraClient(org_config)
     except ValueError as exc:
         console.print(f"\n[red bold]Credential error:[/] {exc}")
+        report.error = abort_info(f"Credential error: {exc}", secrets=secrets)
         sys.exit(1)
 
     _preflight_validate(
-        client, team_config.project_key, all_payloads, console, persist=persist,
+        client, team_config.project_key, all_payloads, console,
+        persist=persist, report=report, secrets=secrets,
     )
 
     # -- Step 8: Fix versions -----------------------------------------------
@@ -893,7 +934,7 @@ def _run_plan_inner(
     console.print()
     _check_and_create_fix_versions(
         client, team_config.project_key, needed_versions, console,
-        assume_yes=assume_yes,
+        assume_yes=assume_yes, report=report, secrets=secrets,
     )
 
     # -- Step 9: Duplicate warning + confirm --------------------------------
@@ -905,6 +946,9 @@ def _run_plan_inner(
         f"\nCreate these {total} tickets?", default=False, console=console
     ):
         console.print("[red]Aborted.[/]")
+        report.error = abort_info(
+            "User declined ticket creation at the final confirmation."
+        )
         sys.exit(1)
 
     # -- Step 10: Create epics (resume-aware) -------------------------------
@@ -943,10 +987,12 @@ def _run_plan_inner(
                 report.issues.append(
                     IssueResult(
                         template_key=tk, kind="epic",
-                        status="failed", error=str(exc),
+                        status="failed",
+                        error=sanitize_message(str(exc), secrets=secrets),
                     )
                 )
                 report.counts["failed"] = report.counts.get("failed", 0) + 1
+                report.error = error_info(exc, secrets=secrets)
                 persist()
                 console.print(f"\n[red bold]Failed to create epic {ref_key}:[/] {exc}")
                 sys.exit(1)
@@ -997,12 +1043,12 @@ def _run_plan_inner(
     per_release_keys = _bulk_create_with_resume(
         client, final_payloads["per_release"], "per_release",
         prior_created_keys=prior_created_keys,
-        report=report, persist=persist, console=console,
+        report=report, persist=persist, console=console, secrets=secrets,
     )
     per_sprint_keys = _bulk_create_with_resume(
         client, final_payloads["per_sprint"], "per_sprint",
         prior_created_keys=prior_created_keys,
-        report=report, persist=persist, console=console,
+        report=report, persist=persist, console=console, secrets=secrets,
     )
 
     # -- Step 13: Final status flip + persist -------------------------------
@@ -1028,6 +1074,7 @@ def _bulk_create_with_resume(
     report: RunReport,
     persist,
     console: Console,
+    secrets: tuple[str, ...] = (),
 ) -> list[str]:
     """Bulk-create tickets with resume support.
 
@@ -1035,7 +1082,8 @@ def _bulk_create_with_resume(
     prior report (recorded as already-created in ``report.issues``). Strips
     ``_template_key`` from remaining payloads before sending. On bulk failure,
     every remaining payload is recorded as ``status=failed`` so the user can
-    retry just those rows on the next resume.
+    retry just those rows on the next resume, and the exception is recorded
+    as ``report.error`` (``secrets`` are redacted from its message).
 
     Returns:
         List of newly-created Jira keys (does NOT include resumed keys —
@@ -1074,10 +1122,12 @@ def _bulk_create_with_resume(
             report.issues.append(
                 IssueResult(
                     template_key=tk, kind=kind,  # type: ignore[arg-type]
-                    status="failed", error=str(exc),
+                    status="failed",
+                    error=sanitize_message(str(exc), secrets=secrets),
                 )
             )
             report.counts["failed"] = report.counts.get("failed", 0) + 1
+        report.error = error_info(exc, secrets=secrets)
         persist()
         console.print(f"\n[red bold]Bulk creation failed:[/] {exc}")
         console.print("[yellow]Some tickets may have been created. Check Jira.[/]")

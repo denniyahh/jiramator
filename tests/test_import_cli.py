@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+import requests
 from click.testing import CliRunner
 
 from jiramator.cli import cli
@@ -239,6 +240,122 @@ class TestImportCommand:
         assert "Row 2" in result.output
         assert "boom" in result.output
 
+    def test_live_import_connection_error_writes_report_with_error(
+        self,
+        runner: CliRunner,
+        monkeypatch: pytest.MonkeyPatch,
+        org_config_path: Path,
+        team_config_path: Path,
+        tmp_path: Path,
+    ):
+        sheet_path = tmp_path / "import.csv"
+        sheet_path.write_text("Summary\nRisk A\n")
+        monkeypatch.setattr(
+            "jiramator.cli.read_spreadsheet",
+            lambda *args, **kwargs: [{"Summary": "Risk A"}],
+        )
+        client = MagicMock()
+        client.get_fields.side_effect = requests.exceptions.ConnectionError("boom")
+        monkeypatch.setattr("jiramator.cli.JiraClient", lambda org_config: client)
+        report_path = tmp_path / "r.json"
+
+        result = runner.invoke(
+            cli,
+            [
+                "import",
+                "--org-config", str(org_config_path),
+                "--team-config", str(team_config_path),
+                "--report", str(report_path),
+                str(sheet_path),
+            ],
+        )
+
+        assert result.exit_code != 0
+        assert isinstance(result.exception, requests.exceptions.ConnectionError)
+        assert report_path.exists()
+        run = json.loads(report_path.read_text(encoding="utf-8"))["run"]
+        assert run["error"] == {"type": "ConnectionError", "message": "boom"}
+        assert run["ended_at"].endswith("Z")
+        assert run["status"] == "failed"
+
+    def test_live_import_credential_error_records_value_error(
+        self,
+        runner: CliRunner,
+        monkeypatch: pytest.MonkeyPatch,
+        org_config_path: Path,
+        team_config_path: Path,
+        tmp_path: Path,
+    ):
+        sheet_path = tmp_path / "import.csv"
+        sheet_path.write_text("Summary\nRisk A\n")
+        monkeypatch.setattr(
+            "jiramator.cli.read_spreadsheet",
+            lambda *args, **kwargs: [{"Summary": "Risk A"}],
+        )
+
+        def _raise(org_config):
+            raise ValueError("missing token")
+
+        monkeypatch.setattr("jiramator.cli.JiraClient", _raise)
+        report_path = tmp_path / "r.json"
+
+        result = runner.invoke(
+            cli,
+            [
+                "import",
+                "--org-config", str(org_config_path),
+                "--team-config", str(team_config_path),
+                "--report", str(report_path),
+                str(sheet_path),
+            ],
+        )
+
+        assert result.exit_code == 1
+        assert "Import error: missing token" in result.output
+        run = json.loads(report_path.read_text(encoding="utf-8"))["run"]
+        assert run["error"] == {"type": "ValueError", "message": "missing token"}
+        assert run["ended_at"] is not None
+
+    def test_live_import_inner_error_not_overwritten_by_cli(
+        self,
+        runner: CliRunner,
+        monkeypatch: pytest.MonkeyPatch,
+        org_config_path: Path,
+        team_config_path: Path,
+        tmp_path: Path,
+    ):
+        sheet_path = tmp_path / "import.csv"
+        sheet_path.write_text("Summary\nRisk A\n")
+        monkeypatch.setattr(
+            "jiramator.cli.read_spreadsheet",
+            lambda *args, **kwargs: [{"Summary": "Risk A"}],
+        )
+        client = MagicMock()
+        client.get_fields.return_value = []
+        monkeypatch.setattr("jiramator.cli.JiraClient", lambda org_config: client)
+
+        def _inner(*args, report=None, report_path=None, **kwargs):
+            report.error = {"type": "InnerError", "message": "from run_import"}
+            raise ValueError("outer")
+
+        monkeypatch.setattr("jiramator.cli.run_import", _inner)
+        report_path = tmp_path / "r.json"
+
+        result = runner.invoke(
+            cli,
+            [
+                "import",
+                "--org-config", str(org_config_path),
+                "--team-config", str(team_config_path),
+                "--report", str(report_path),
+                str(sheet_path),
+            ],
+        )
+
+        assert result.exit_code == 1
+        run = json.loads(report_path.read_text(encoding="utf-8"))["run"]
+        assert run["error"] == {"type": "InnerError", "message": "from run_import"}
+
 
 class TestUpdateCommand:
     def test_help_shows_expected_options(self, runner: CliRunner) -> None:
@@ -346,6 +463,49 @@ class TestUpdateCommand:
         assert run["issues"][0]["status"] == "updated"
         assert run["issues"][0]["jira_key"] == "CA-1"
         assert run["issues"][0]["fields"] == ["customfield_14823"]
+
+    def test_live_run_redacts_credentials_in_update_report(
+        self,
+        runner: CliRunner,
+        monkeypatch: pytest.MonkeyPatch,
+        org_config_path: Path,
+        tmp_path: Path,
+    ) -> None:
+        token = "update-secret-token-1234"
+        monkeypatch.setenv("JIRA_EMAIL", "user@example.com")
+        monkeypatch.setenv("JIRA_TOKEN", token)
+        sheet_path = tmp_path / "update.csv"
+        sheet_path.write_text("Key,Platform\nCA-1,Calcs\nCA-2,Calcs\n")
+        report_path = tmp_path / "update-report.json"
+        rows = [{"Key": "CA-1", "Platform": "Calcs"}, {"Key": "CA-2", "Platform": "Calcs"}]
+
+        client = MagicMock()
+        client.get_fields.return_value = []
+        monkeypatch.setattr("jiramator.cli.JiraClient", lambda org_config: client)
+        monkeypatch.setattr("jiramator.cli.read_spreadsheet", lambda *args, **kwargs: rows)
+
+        result_obj = MagicMock(
+            preview=MagicMock(row_results=[]),
+            updated=[],
+            skipped=[(2, "CA-2", f"skipped with {token}")],
+            failed=[(1, "CA-1", f"Jira said: authorization: basic dXNlcjp0b2s= and {token}")],
+        )
+        monkeypatch.setattr("jiramator.cli.run_update", lambda *args, **kwargs: result_obj)
+        monkeypatch.setattr("jiramator.cli.render_update_preview_report", lambda *args, **kwargs: "UPDATE PREVIEW")
+        monkeypatch.setattr("jiramator.cli.render_update_execution_report", lambda *args, **kwargs: "UPDATE EXECUTION")
+
+        result = runner.invoke(
+            cli,
+            ["update", "--org-config", str(org_config_path), "--report", str(report_path), str(sheet_path)],
+        )
+
+        assert result.exit_code == 1
+        raw = report_path.read_text(encoding="utf-8")
+        assert token not in raw
+        assert "dXNlcjp0b2s=" not in raw
+        errors = {i["jira_key"]: i["error"] for i in json.loads(raw)["run"]["issues"]}
+        assert errors["CA-1"] == "Jira said: authorization: basic *** and ***"
+        assert errors["CA-2"] == "skipped with ***"
 
     def test_duplicate_keys_exit_before_jira_client(
         self,

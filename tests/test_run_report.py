@@ -6,19 +6,26 @@ Plan: 01-03 Task 1.
 
 from __future__ import annotations
 
+import base64
 import json
 import sys
 from dataclasses import asdict
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from jiramator.run_report import (
+    _ERROR_MESSAGE_CAP,
+    ABORTED_ERROR_TYPE,
     ConfigDriftError,
     IssueResult,
     RunReport,
+    abort_info,
     compute_resolved_hash,
+    credential_secrets,
     default_report_path,
+    error_info,
     find_resumable,
     write_report_atomic,
 )
@@ -80,6 +87,74 @@ class TestEnvelopeRoundTrip:
         """No schema_version key at all → treats as None != 1 → rejects."""
         with pytest.raises(ValueError):
             RunReport.from_envelope({})
+
+
+    def test_26_error_round_trips(self):
+        r = RunReport(error={"type": "ValueError", "message": "boom"})
+        env = r.to_envelope()
+        assert env["run"]["error"] == {"type": "ValueError", "message": "boom"}
+        r2 = RunReport.from_envelope(json.loads(json.dumps(env)))
+        assert asdict(r2) == asdict(r)
+
+    def test_27_legacy_envelope_without_error_loads(self):
+        # Literal v1.2.8-shaped envelope: every pre-INV-04 key, no "error".
+        legacy = {
+            "schema_version": 1,
+            "run": {
+                "schema_version": 1,
+                "command": ["jiramator", "plan"],
+                "started_at": "2026-04-29T10:00:00+00:00",
+                "ended_at": None,
+                "team_config_path": "/abs/team.yaml",
+                "org_config_path": "/abs/org.yaml",
+                "team_name": "T",
+                "pi_label": "PI28",
+                "versions": ["26.1.1"],
+                "resolved_config_hash": "abc",
+                "status": "failed",
+                "counts": {"created": 0, "skipped": 0, "failed": 0},
+                "issues": [
+                    {
+                        "template_key": "epic:bau", "kind": "epic",
+                        "status": "created", "jira_key": "X-1",
+                        "error": None, "fields": [],
+                    },
+                ],
+            },
+        }
+        r = RunReport.from_envelope(legacy)
+        assert r.error is None
+        assert r.issues[0].jira_key == "X-1"
+
+    def test_28_unknown_keys_ignored(self):
+        env = RunReport(
+            issues=[IssueResult(template_key="a", kind="epic", status="created")],
+        ).to_envelope()
+        env["run"]["future_run_key"] = {"x": 1}
+        env["run"]["issues"][0]["future_issue_key"] = "y"
+        r = RunReport.from_envelope(env)
+        assert not hasattr(r, "future_run_key")
+        assert r.issues[0].template_key == "a"
+        assert "future_issue_key" not in asdict(r.issues[0])
+
+    @pytest.mark.parametrize(
+        "envelope",
+        [
+            {"schema_version": 1, "run": {"issues": ["bad"]}},
+            {"schema_version": 1, "run": {"issues": [None]}},
+            {"schema_version": 1, "run": {"issues": {"a": {}}}},
+            {"schema_version": 1, "run": {"issues": "x"}},
+            {"schema_version": 1, "run": {"error": "boom"}},
+            {"schema_version": 1, "run": ["not", "a", "dict"]},
+            ["not", "an", "envelope"],
+        ],
+    )
+    def test_28b_malformed_shape_raises_value_error(self, envelope):
+        with pytest.raises(ValueError):
+            RunReport.from_envelope(envelope)
+
+    def test_29_error_omitted_when_none(self):
+        assert "error" not in RunReport().to_envelope()["run"]
 
 
 # ---------------------------------------------------------------------------
@@ -154,6 +229,117 @@ class TestDefaultReportPath:
         # Path("a/b/c.yaml").stem == "c" (Path.stem strips the directory),
         # but the helper documents `/` → `_` for defense in depth.
         assert p.name.endswith("-c.json")
+
+
+# ---------------------------------------------------------------------------
+# Error capture (INV-04)
+# ---------------------------------------------------------------------------
+
+
+class TestErrorInfo:
+    def test_30_error_info_truncates_at_cap(self):
+        info = error_info(ValueError("x" * 5000))
+        assert info["type"] == "ValueError"
+        assert len(info["message"]) == _ERROR_MESSAGE_CAP + 1
+        assert info["message"].endswith("…")
+
+    def test_30b_cap_measured_in_code_points(self):
+        info = error_info(ValueError("é" * (_ERROR_MESSAGE_CAP + 10)))
+        assert info["message"] == "é" * _ERROR_MESSAGE_CAP + "…"
+        exact = error_info(ValueError("é" * _ERROR_MESSAGE_CAP))
+        assert exact["message"] == "é" * _ERROR_MESSAGE_CAP
+
+    def test_31_error_info_empty_message_kept(self):
+        assert error_info(KeyboardInterrupt()) == {
+            "type": "KeyboardInterrupt", "message": "",
+        }
+        r = RunReport(error=error_info(KeyboardInterrupt()))
+        assert r.to_envelope()["run"]["error"]["message"] == ""
+
+    def test_32_error_info_redacts_credentials(self):
+        basic = error_info(RuntimeError("Authorization: Basic dXNlcjp0b2tlbg=="))
+        assert "***" in basic["message"]
+        assert "Basic" in basic["message"]
+        assert "dXNlcjp0b2tlbg==" not in basic["message"]
+
+        bearer = error_info(RuntimeError("header Bearer abc.def.ghi rejected"))
+        assert "abc.def.ghi" not in bearer["message"]
+        assert "Bearer ***" in bearer["message"]
+
+        tok = error_info(RuntimeError("tok SECRET123 here"), secrets=("SECRET123",))
+        assert "***" in tok["message"]
+        assert "SECRET123" not in tok["message"]
+
+        # An empty-string secret is ignored (would otherwise mangle every char)
+        plain = error_info(RuntimeError("nothing secret"), secrets=("",))
+        assert plain["message"] == "nothing secret"
+
+    def test_32d_basic_constraints_tls_error_not_redacted(self):
+        msg = (
+            "certificate verify failed: Basic Constraints of CA cert "
+            "not marked critical (_ssl.c:1006)"
+        )
+        assert error_info(RuntimeError(msg))["message"] == msg
+        lower = "ssl error: basic constraints of ca cert not marked critical"
+        assert error_info(RuntimeError(lower))["message"] == lower
+
+    @pytest.mark.parametrize(
+        ("raw", "secret", "expected"),
+        [
+            (
+                "authorization: basic dXNlcjp0b2s=",
+                "dXNlcjp0b2s=",
+                "authorization: basic ***",
+            ),
+            ("header BEARER abc.def rejected", "abc.def", "header BEARER *** rejected"),
+            ("Authorization: Basic=dXNlcjp0b2s=", "dXNlcjp0b2s=", "Authorization: Basic=***"),
+            ("Authorization: Basic:dXNlcjp0b2s=", "dXNlcjp0b2s=", "Authorization: Basic:***"),
+            ("auth bearer\tabc123 x", "abc123", "auth bearer\t*** x"),
+            ("Basic  Constraintsabc", "Constraintsabc", "Basic  ***"),
+        ],
+    )
+    def test_32e_credential_scheme_any_case_and_separator_redacted(
+        self, raw, secret, expected
+    ):
+        msg = error_info(RuntimeError(raw))["message"]
+        assert secret not in msg
+        assert msg == expected
+
+    def test_32f_credential_secrets_include_basic_auth_b64(self, monkeypatch):
+        org = SimpleNamespace(jira_email_env="JM_E", jira_token_env="JM_T")
+        monkeypatch.delenv("JM_E", raising=False)
+        monkeypatch.delenv("JM_T", raising=False)
+        assert credential_secrets(org) == ()
+
+        monkeypatch.setenv("JM_T", " tok123 ")
+        assert credential_secrets(org) == ("tok123",)
+
+        monkeypatch.setenv("JM_E", "me@example.com")
+        b64 = base64.b64encode(b"me@example.com:tok123").decode()
+        assert credential_secrets(org) == ("tok123", b64)
+        # The b64 credential is redacted even without a scheme word nearby.
+        msg = error_info(
+            RuntimeError(f"echoed {b64} back"), secrets=credential_secrets(org)
+        )["message"]
+        assert b64 not in msg
+
+    def test_32b_redaction_before_truncation(self):
+        secret = "S" * 50
+        msg = "x" * (_ERROR_MESSAGE_CAP - 10) + secret
+        info = error_info(RuntimeError(msg), secrets=(secret,))
+        assert "S" not in info["message"]
+
+    def test_32c_abort_info_uses_aborted_label(self):
+        info = abort_info("Credential error: tok SECRET", secrets=("SECRET",))
+        assert info["type"] == ABORTED_ERROR_TYPE == "Aborted"
+        assert info["message"] == "Credential error: tok ***"
+
+    def test_33_non_ascii_message_round_trips(self, tmp_path):
+        path = tmp_path / "r.json"
+        r = RunReport(error=error_info(RuntimeError("café — ✗")))
+        write_report_atomic(r, path)
+        loaded = RunReport.from_envelope(json.loads(path.read_text(encoding="utf-8")))
+        assert loaded.error == {"type": "RuntimeError", "message": "café — ✗"}
 
 
 # ---------------------------------------------------------------------------
@@ -287,6 +473,29 @@ class TestFindResumable:
         assert via_real is not None
         assert via_link is not None
         assert via_real == via_link
+
+
+    def test_34_report_with_error_still_resumable(self, tmp_path, monkeypatch):
+        runs = tmp_path / "runs"
+        runs.mkdir()
+        monkeypatch.setattr("jiramator.run_report.RUNS_DIR", runs)
+        team_path = tmp_path / "team.yaml"
+        team_path.write_text("team_name: x\n")
+
+        r = RunReport(
+            team_config_path=str(team_path.resolve()),
+            started_at="2026-04-28T11:00:00Z",
+            ended_at="2026-04-28T11:00:05Z",
+            status="failed",
+            error={"type": "ConnectionError", "message": "boom"},
+        )
+        (runs / "E.json").write_text(json.dumps(r.to_envelope()))
+
+        result = find_resumable(team_path)
+        assert result is not None
+        assert result.name == "E.json"
+        loaded = RunReport.from_envelope(json.loads(result.read_text()))
+        assert loaded.error == {"type": "ConnectionError", "message": "boom"}
 
 
 # ---------------------------------------------------------------------------

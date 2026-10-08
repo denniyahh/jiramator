@@ -11,6 +11,26 @@ All notable changes to Jiramator are documented here. This project adheres to
   findings were fixed: import order, unused imports, `datetime.UTC`, explicit
   `raise ... from None`, and specific exception types in tests instead of bare
   `pytest.raises(Exception)`.
+- **Run reports record why a run stopped.** When `plan` or `import` exits on an
+  exception or a deliberate abort, the run report now records `ended_at` and an
+  `error` object (`type`, `message`) before the error propagates. Secrets are
+  redacted from that message and from the per-issue `error` strings in the
+  same `plan`/`import` report, and from the per-row `error` strings in the
+  `update` report. The configured Jira token, its Basic-auth
+  `base64(email:token)` form, and any `Basic`/`Bearer` credential (scheme in
+  any case, followed by whitespace, `:` or `=`) become `***`. The TLS
+  diagnostic "Basic Constraints of CA cert not marked critical" is left
+  intact. Each recorded message is capped at 2,000 characters. Deliberate
+  aborts (declining a confirmation, a credential error, field-validation
+  problems, declining fix-version creation) use type `Aborted` with a readable
+  reason; declining the final ticket-creation confirmation records "User
+  declined ticket creation at the final confirmation." Exit codes are
+  unchanged. Console output is unchanged except that declining fix-version
+  creation now names the declined versions ("Aborted. Cannot proceed without
+  fix versions (declined creating: …)."). Older reports
+  still load and `--resume` still works; reports from clean runs carry no
+  `error` key. Caveat: a report written by 1.2.9 or later for a crashed or
+  aborted run contains `error` and cannot be resumed by 1.2.8 or earlier.
 
 ### Fixed
 - Four `import` CLI tests patched `jiramator.cli.build_preview_report`, a symbol
