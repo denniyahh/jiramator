@@ -23,7 +23,7 @@ the real run-report directory. Feature work is parked as v1.3 candidate seeds.
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Production Triage** - Root-cause the unexplained `plan` failures in production run reports
+- [x] **Phase 1: Production Triage** - Root-cause the unexplained `plan` failures in production run reports (completed 2026-10-08)
 - [ ] **Phase 2: Import Preflight Validation** - `import` validates every row against Jira's createmeta schema before writing
 - [ ] **Phase 3: Safe User Resolution** - `import` never assigns a reporter/assignee from an ambiguous or fuzzy user match
 - [ ] **Phase 4: Error, Config & Test Hygiene** - Clean errors instead of tracebacks, validated field IDs, tests isolated from real run reports
@@ -31,6 +31,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 ## Phase Details
 
 ### Phase 1: Production Triage
+
 **Goal**: Every unexplained production failure in the work clone's run reports has a known root cause, and each is either fixed, folded into a later phase, or filed
 **Depends on**: Nothing (first phase; findings may add requirements to Phases 2–4)
 **Requirements**: INV-01, INV-02, INV-03, INV-04
@@ -39,9 +40,25 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. The `Version name 'Fix versions' is not valid` error is attributed to config or code; if code, it is fixed with a regression test
   3. Each zero-count `failed` report from 2026-07-16/17/21 is classified (HYG-04 traceback, config error, or new defect) and any new defect has a requirement or issue
   4. A `plan` or `import` that crashes leaves a run report with `ended_at` and the exception type/message; pre-existing reports still load and `--resume` still works
-**Plans**: TBD
+
+**Plans**: 5/5 plans complete
+
+Plans:
+**Wave 1**
+- [x] 01-01-PLAN.md — INV-04: run reports record `ended_at` + error on plan/import crash or abort; legacy reports still load/resume (wave 1)
+- [x] 01-02-PLAN.md — INV-02/INV-03: findings table for every failed report, INV-02 attribution, D-NEW-1 → HYG-05, persisted D-03 baseline (wave 1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [x] 01-03-PLAN.md — INV-01: offline reproduction of candidate exits + D-03 decision + user evidence checkpoints (wave 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [x] 01-04-PLAN.md — INV-01: evidence narrowing, user decision checkpoint, root cause + dispositions (wave 3)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+- [x] 01-05-PLAN.md — Phase close: classified work-clone integrity check, completeness + suite, sandbox cleanup (wave 4)
 
 ### Phase 2: Import Preflight Validation
+
 **Goal**: A user sees every row `import` would fail on — missing required fields, rejected option values, non-ADF rich text — before anything is written to Jira
 **Depends on**: Phase 1 (triage may surface related import defects)
 **Requirements**: PRE-01, PRE-02, PRE-03, PRE-04
@@ -50,9 +67,11 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. Invalid select values and plain-text-for-ADF values are reported in the same preview
   3. A live `import` reports all failing rows up front instead of discovering them one 400 at a time
   4. Without credentials, `import --dry-run` still previews and says schema validation was skipped
+
 **Plans**: TBD
 
 ### Phase 3: Safe User Resolution
+
 **Goal**: Reporter/assignee values in `import` resolve to a user only when the match is unambiguous; every other case is skipped with a visible warning
 **Depends on**: Phase 2 (ambiguous-user warnings appear in the same preflight preview)
 **Requirements**: USER-01, USER-02, USER-03, USER-04, USER-05
@@ -61,18 +80,22 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. Multiple fuzzy candidates, or one non-exact candidate: the field is left unset and a warning lists row, value and candidates
   3. `import --dry-run` with credentials lists ambiguous/unresolved user values before any write
   4. Tests cover exact, ambiguous, single-fuzzy and no-match cases; none resolve to `users[0]`
+
 **Plans**: TBD
 
 ### Phase 4: Error, Config & Test Hygiene
+
 **Goal**: Misconfiguration and build errors fail loudly and cleanly, and the test suite never pollutes real run reports
 **Depends on**: Phase 1 (triage may attribute failures to HYG-04)
-**Requirements**: HYG-01, HYG-02, HYG-03, HYG-04, TEST-01
+**Requirements**: HYG-01, HYG-02, HYG-03, HYG-04, TEST-01, HYG-05
 **Success Criteria** (what must be TRUE):
   1. When `init` cannot detect the Epic Link field it prints a visible warning and never silently writes `customfield_XXXXX`
   2. An invalid `custom_fields` value fails config loading with an error naming the key, the value and the expected format
   3. A `ConfigValidationError` raised inside a `@contextmanager`/`ExitStack` scope surfaces as itself on every supported Python, and equal errors still compare equal — locked by a regression test
   4. `plan --dry-run` with a release count missing from `release_sprint_schedule` prints the builder's actionable error and exits 1 with no traceback
   5. A full `pytest` run leaves the working tree's `.jiramator/runs/` unchanged
+  6. A connection, TLS or timeout error during any Jira call prints an actionable error, and one during bulk create leaves those rows recorded as failed so `--resume` cannot silently duplicate them
+
 **Plans**: TBD
 
 ## Progress
@@ -82,7 +105,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Production Triage | 0/TBD | Not started | - |
+| 1. Production Triage | 5/5 | Complete    | 2026-10-08 |
 | 2. Import Preflight Validation | 0/TBD | Not started | - |
 | 3. Safe User Resolution | 0/TBD | Not started | - |
 | 4. Error, Config & Test Hygiene | 0/TBD | Not started | - |

@@ -33,17 +33,19 @@ contract users rely on.
 - ✓ Template inheritance: org `default_fields` → team `defaults` → template `fields` — v1.0
 - ✓ `init` interactive setup wizard for org/team config — v1.0 (CONF-01)
 - ✓ Corporate TLS interception support (`JIRAMATOR_CA_BUNDLE`, `JIRAMATOR_RELAX_TLS_STRICT`) — existing
-- ✓ CI on Linux/macOS/Windows × Python 3.11–3.13; 653 tests passing — existing
+- ✓ CI on Linux/macOS/Windows × Python 3.11–3.13; 699 tests passing — existing (Phase 1 count)
+- ✓ Unexplained production `plan` failures are root-caused (INV-01 user-accepted residual, INV-02 config + already-fixed code gap, INV-03 all 5 zero-count failures classified) — Phase 1
+- ✓ Crashed/aborted `plan`/`import` runs record `ended_at` + `error` in the run report, with credential redaction across `plan`/`import`/`update` reports (INV-04) — Phase 1
 
 ### Active
 
 <!-- Milestone: v1.2.9 Hardening (1.2.x patch releases). Hypotheses until shipped. -->
 
-- [ ] Unexplained production `plan` failures are root-caused
 - [ ] `import` validates every row against Jira's schema before writing (as `plan` does)
 - [ ] User lookups never silently pick the wrong person on ambiguous names
 - [ ] Build/config errors surface as clean messages, never tracebacks or silent placeholders
 - [ ] The test suite never writes into the real run-report directory
+- [ ] Jira connection/TLS/timeout errors surface as `JiraApiError`, and a bulk-create transport error marks the batch failed in the report (HYG-05, emerged in Phase 1 triage)
 
 v1.3 candidates (features) are parked as seeds in `.planning/seeds/`.
 
@@ -93,6 +95,9 @@ v1.3 candidates (features) are parked as seeds in `.planning/seeds/`.
 | Ambiguous user match → skip + warn (not first result) | Mirrors existing "could not resolve" UX; wrong assignment is worse than none | — Pending |
 | `.planning/` stays local (gitignored, `commit_docs: false`) | Personal workflow state never committed to shared branches | ✓ Good |
 | Each phase runs in its own worktree: `wsx new gsd/phase-NN-<slug>` off `develop`, merged back `--no-ff` per phase; GSD `branching_strategy: none` inside it, `git.base_branch: develop`, `workflow.use_worktrees: true` for executor isolation | Global rule: never commit to integration branches, all dev in dedicated worktrees. GSD's `phase` strategy would `git switch` in the current worktree and fork from `origin/HEAD` (`main`) | ✓ Good |
+| INV-01 closed as a user-accepted residual (exits c, d, e, f, g, h, j) rather than a single guessed cause | The report alone could not distinguish the exits; JQL shows no writes, so no duplicate-ticket harm. INV-04 now records each exit distinctly; HYG-05 owns the transport-error branches | ✓ Good |
+| Credential redaction errs on over-redaction (any word after `basic`/`bearer`, except "Basic Constraints") | Leak safety outweighs diagnostic fidelity; the real Jira token is also caught by exact match | ✓ Good (accepted in UAT 2026-10-05) |
+| Abort reasons may be more informative in the report than on screen; fix-version decline console line now names the versions | Plan's "equal to console" + "console unchanged" criteria were over-literal; additive changes only, exit codes unchanged | ✓ Good (accepted in UAT 2026-10-08) |
 | Skip domain research | Brownfield hardening of a well-mapped codebase; codebase map suffices | — Pending |
 
 ## Evolution
@@ -113,4 +118,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-09-29 after re-scoping to v1.2.9 Hardening*
+*Last updated: 2026-10-08 after Phase 1*

@@ -11,10 +11,10 @@ defect. Feature work moved to v1.3 candidate seeds in `.planning/seeds/`.
 
 ### Production Triage (INV)
 
-- [ ] **INV-01**: The root cause of the live `plan` failure on 2026-07-21 (work clone report `20260721T121841Z-calcs.json`, status `failed`, 0 created/failed) is identified and either fixed here or filed
-- [ ] **INV-02**: The root cause of `fixVersions: Version name 'Fix versions' is not valid` (2026-07-13 `plan`, dm-test) is identified as config or code, and fixed or documented
-- [ ] **INV-03**: Every `failed` run with 0 counts in the work clone's reports (2026-07-16, 07-17, 07-21) is classified: covered by HYG-04, config error, or a new defect
-- [ ] **INV-04**: When a command that writes a run report exits on an exception, the report records `ended_at` and the error (exception type + message) before re-raising; reports without these fields still load and resume
+- [x] **INV-01**: The root cause of the live `plan` failure on 2026-07-21 (work clone report `20260721T121841Z-calcs.json`, status `failed`, 0 created/failed) is identified and either fixed here or filed
+- [x] **INV-02**: The root cause of `fixVersions: Version name 'Fix versions' is not valid` (2026-07-13 `plan`, dm-test) is identified as config or code, and fixed or documented
+- [x] **INV-03**: Every `failed` run with 0 counts in the work clone's reports (2026-07-16, 07-17, 07-21) is classified: covered by HYG-04, config error, or a new defect
+- [x] **INV-04**: When a command that writes a run report exits on an exception, the report records `ended_at` and the error (exception type + message) before re-raising; reports without these fields still load and resume
 
 ### Import Preflight (PRE)
 
@@ -37,6 +37,7 @@ defect. Feature work moved to v1.3 candidate seeds in `.planning/seeds/`.
 - [ ] **HYG-02**: Loading an org config with a `custom_fields` value not matching `customfield_\d+` (or a known system field) fails with an actionable error
 - [ ] **HYG-03**: `ConfigValidationError` propagates through `@contextmanager` / `ExitStack` / `try-except BaseException` scopes on Python 3.11–3.14 without `FrozenInstanceError`, keeping value equality on `(file, line, field_path, reason)` (v1.0 DEFER-02-01)
 - [ ] **HYG-04**: When `plan` fails to build tickets (e.g. a builder `ValueError` such as a missing `release_sprint_schedule` entry for the given release count), it prints the actionable message via the Rich console and exits 1 — never a Python traceback
+- [ ] **HYG-05**: Jira connection, TLS and timeout errors (requests exceptions) surface as JiraApiError with an actionable message, and a transport error during bulk create marks that batch's rows as failed in the run report instead of leaving them unrecorded (found in Phase 1 triage, D-NEW-1)
 
 ### Test Hygiene (TEST)
 
@@ -64,10 +65,10 @@ smoke suite, dead `__version__` removal.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| INV-01 | Phase 1 | Pending |
-| INV-02 | Phase 1 | Pending |
-| INV-03 | Phase 1 | Pending |
-| INV-04 | Phase 1 | Pending |
+| INV-01 | Phase 1 | Complete |
+| INV-02 | Phase 1 | Complete |
+| INV-03 | Phase 1 | Complete |
+| INV-04 | Phase 1 | Complete |
 | PRE-01 | Phase 2 | Pending |
 | PRE-02 | Phase 2 | Pending |
 | PRE-03 | Phase 2 | Pending |
@@ -81,13 +82,14 @@ smoke suite, dead `__version__` removal.
 | HYG-02 | Phase 4 | Pending |
 | HYG-03 | Phase 4 | Pending |
 | HYG-04 | Phase 4 | Pending |
+| HYG-05 | Phase 4 | Pending |
 | TEST-01 | Phase 4 | Pending |
 
 **Coverage:**
-- v1.2.9 requirements: 18 total
-- Mapped to phases: 18
+- v1.2.9 requirements: 19 total
+- Mapped to phases: 19
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-09-29*
-*Last updated: 2026-09-29 after re-scoping v1.3 → v1.2.9 Hardening*
+*Last updated: 2026-10-02 — added HYG-05 from Phase 1 triage*
