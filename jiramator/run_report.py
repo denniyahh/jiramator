@@ -14,22 +14,31 @@ Public surface (Plan 04 callers depend on these names verbatim):
 - ``find_resumable`` — most-recent partial/failed report whose stored
   team_config_path matches the resolved input; corrupt files skipped.
 - ``compute_resolved_hash`` — sha256(canonical-json) of (org, team, pi, versions).
+- ``error_info`` / ``abort_info`` — build the sanitized run-level ``error``
+  record (``{"type", "message"}``) for crashes and deliberate aborts (INV-04).
+- ``credential_secrets`` / ``sanitize_message`` — redaction for any recorded
+  message (run-level ``error`` and per-issue ``IssueResult.error``).
+- ``ABORTED_ERROR_TYPE`` — the stable ``error.type`` label for deliberate aborts.
 
 Stdlib only — no external imports.
 """
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
+import re
 import tempfile
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:  # avoid an import cycle if config ever pulls run_report
+    from collections.abc import Iterable
+
     from jiramator.config import OrgConfig, TeamConfig
 
 
@@ -39,6 +48,11 @@ if TYPE_CHECKING:  # avoid an import cycle if config ever pulls run_report
 
 SCHEMA_VERSION: int = 1
 RUNS_DIR: Path = Path(".jiramator/runs")
+
+# Max length (in code points) of a recorded run-level error message.
+_ERROR_MESSAGE_CAP: int = 2000
+# ``error.type`` recorded for deliberate aborts (user decline, bad creds, ...).
+ABORTED_ERROR_TYPE: str = "Aborted"
 
 IssueStatus = Literal["created", "updated", "skipped", "failed", "pending"]
 RunStatus = Literal["success", "partial", "failed"]
@@ -97,6 +111,11 @@ class RunReport:
             leaves the report marked failed unless it had time to flip it.
         counts: rolling counters; total per-issue == sum of values.
         issues: per-template/per-version IssueResult entries.
+        error: Run-level failure record ``{"type": str, "message": str}`` set
+            when the run ends on an exception or deliberate abort; ``None``
+            for clean runs (and then omitted from the on-disk envelope so the
+            file stays loadable by older jiramator versions). Distinct from
+            the per-row ``IssueResult.error`` string.
     """
 
     schema_version: int = SCHEMA_VERSION
@@ -114,14 +133,20 @@ class RunReport:
         default_factory=lambda: {"created": 0, "skipped": 0, "failed": 0}
     )
     issues: list[IssueResult] = field(default_factory=list)
+    error: dict[str, str] | None = None
 
     def to_envelope(self) -> dict[str, Any]:
         """Render as ``{"schema_version": N, "run": {...}}`` for JSON write.
 
         ``asdict`` recurses into nested IssueResult dataclasses producing
-        plain dicts — that's the on-disk shape we want.
+        plain dicts — that's the on-disk shape we want. The ``error`` key is
+        omitted when ``None`` so clean reports stay byte-compatible with
+        readers that predate the field (D-13).
         """
-        return {"schema_version": self.schema_version, "run": asdict(self)}
+        run = asdict(self)
+        if run.get("error") is None:
+            run.pop("error", None)
+        return {"schema_version": self.schema_version, "run": run}
 
     @classmethod
     def from_envelope(cls, obj: dict[str, Any]) -> RunReport:
@@ -129,17 +154,143 @@ class RunReport:
 
         Raises:
             ValueError: When ``schema_version != SCHEMA_VERSION`` or the
-                envelope shape is missing the expected keys. The message
-                names both the rejected version and the supported one.
+                envelope shape is wrong (non-object envelope/``run``,
+                ``run.issues`` not a list of objects, ``run.error`` not an
+                object). The version message names both the rejected
+                version and the supported one.
+            KeyError: When the ``run`` key is missing.
         """
+        if not isinstance(obj, dict):
+            raise ValueError("run report envelope must be a JSON object")
         if obj.get("schema_version") != SCHEMA_VERSION:
             raise ValueError(
                 f"Unsupported run report schema_version: {obj.get('schema_version')}; "
                 f"this version of jiramator only reads schema_version={SCHEMA_VERSION}."
             )
-        run = dict(obj["run"])  # shallow copy — don't mutate caller's dict
-        run["issues"] = [IssueResult(**i) for i in run.get("issues", [])]
+        # Keep only known field names so reports written by a newer jiramator
+        # (additive optional keys) still load instead of raising TypeError.
+        run_names = {f.name for f in fields(cls)}
+        issue_names = {f.name for f in fields(IssueResult)}
+        raw_run = obj["run"]
+        if not isinstance(raw_run, dict):
+            raise ValueError("run report 'run' must be an object")
+        run = {k: v for k, v in raw_run.items() if k in run_names}
+        # Validate shapes so a damaged/hand-edited report raises ValueError
+        # (which callers catch) rather than AttributeError.
+        raw_issues = run.get("issues", [])
+        if not isinstance(raw_issues, list) or not all(
+            isinstance(i, dict) for i in raw_issues
+        ):
+            raise ValueError("run report 'run.issues' must be a list of objects")
+        raw_error = run.get("error")
+        if raw_error is not None and not isinstance(raw_error, dict):
+            raise ValueError("run report 'run.error' must be an object or null")
+        run["issues"] = [
+            IssueResult(**{k: v for k, v in i.items() if k in issue_names})
+            for i in raw_issues
+        ]
         return cls(**run)
+
+
+# ---------------------------------------------------------------------------
+# Error capture
+# ---------------------------------------------------------------------------
+
+# ``Basic``/``Bearer`` scheme followed by a credential token (Authorization
+# header text echoed into an exception message). The scheme word and its
+# separator are kept. Auth schemes are case-insensitive (RFC 7235), and the
+# separator may be whitespace, ``:`` or ``=`` (``Basic=<b64>``). The token's
+# first character excludes the separator set so backtracking can't shift
+# the token start past the exemption below.
+# The OpenSSL TLS diagnostic "Basic Constraints of CA cert not marked
+# critical" (see README Troubleshooting / JIRAMATOR_RELAX_TLS_STRICT) is
+# exempt: "Constraints" is never a credential, and that keyword is what
+# identifies the corporate-TLS failure in a recorded report.
+_AUTH_CREDENTIAL_RE = re.compile(
+    r"\b(basic|bearer)([\s:=]+)(?!constraints\b)[^\s'\",;:=][^\s'\",;]*",
+    re.IGNORECASE,
+)
+
+
+def credential_secrets(org_config: OrgConfig) -> tuple[str, ...]:
+    """Return literal credential values to redact from recorded messages.
+
+    Includes the configured Jira token and, when the email is also set, the
+    Basic-auth credential ``base64(email:token)`` that ``requests`` sends —
+    the form most likely to be echoed into an exception message.
+
+    Args:
+        org_config: Org config naming the email/token env vars.
+
+    Returns:
+        Non-empty secret strings (possibly an empty tuple).
+    """
+    token = os.environ.get(org_config.jira_token_env, "").strip()
+    if not token:
+        return ()
+    email = os.environ.get(org_config.jira_email_env, "").strip()
+    if not email:
+        return (token,)
+    basic = base64.b64encode(f"{email}:{token}".encode("latin-1", "replace")).decode()
+    return (token, basic)
+
+
+def sanitize_message(message: str, *, secrets: Iterable[str] = ()) -> str:
+    """Redact secrets from ``message`` and cap its length.
+
+    Used for the run-level ``error`` record and for every per-issue
+    ``IssueResult.error`` string, so no field of a written report carries an
+    unredacted credential.
+
+    Redaction runs BEFORE truncation so a cut can never expose a prefix of a
+    token. Every non-empty value in ``secrets`` is replaced with ``***``,
+    then any ``Basic``/``Bearer`` credential (any case, separated by
+    whitespace, ``:`` or ``=``) becomes ``<scheme><separator>***``.
+    The cap is measured in ``str`` length (code points); longer messages are
+    cut to ``_ERROR_MESSAGE_CAP`` code points plus a trailing ``…``.
+    """
+    for secret in secrets:
+        if secret:
+            message = message.replace(secret, "***")
+    message = _AUTH_CREDENTIAL_RE.sub(r"\1\2***", message)
+    if len(message) > _ERROR_MESSAGE_CAP:
+        message = message[:_ERROR_MESSAGE_CAP] + "…"
+    return message
+
+
+def error_info(exc: BaseException, *, secrets: Iterable[str] = ()) -> dict[str, str]:
+    """Build the run-level ``error`` record for an exception.
+
+    Only the exception class name and ``str(exc)`` are recorded — never a
+    traceback, ``repr``, request object, headers, or locals.
+
+    Args:
+        exc: The exception that ended the run. Only read, never mutated.
+        secrets: Literal values (e.g. the Jira token) to redact.
+
+    Returns:
+        ``{"type": <class name>, "message": <sanitized message>}``.
+    """
+    return {
+        "type": type(exc).__name__,
+        "message": sanitize_message(str(exc), secrets=secrets),
+    }
+
+
+def abort_info(reason: str, *, secrets: Iterable[str] = ()) -> dict[str, str]:
+    """Build the run-level ``error`` record for a deliberate abort.
+
+    Args:
+        reason: Human-readable reason, matching what was printed to the user.
+        secrets: Literal values to redact from ``reason``.
+
+    Returns:
+        ``{"type": ABORTED_ERROR_TYPE, "message": <sanitized reason>}``.
+    """
+    return {
+        "type": ABORTED_ERROR_TYPE,
+        "message": sanitize_message(reason, secrets=secrets),
+    }
 
 
 # ---------------------------------------------------------------------------
