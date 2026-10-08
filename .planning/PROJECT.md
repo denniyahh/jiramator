@@ -63,6 +63,7 @@ v1.3 candidates (features) are parked as seeds in `.planning/seeds/`.
   8 plans, complete) is archived in `.planning/milestones/v1.0-*`, imported from the work
   clone (`~/dev/work_projects/jiramator`). This personal clone is the primary dev repo; the
   work clone is the production/corporate-sharing copy.
+- Remotes: personal `origin` (denniyahh/jiramator, PUBLIC) is canonical for local dev branches. The work clone's `origin` (work-account/jiramator, PRIVATE) is a custom fork: core code syncs one way (personal → work, e.g. `git push work develop:develop` from the personal repo, which has remote `work`). Work-only files (e.g. `fc1ea30` real Calcs team config on work `main`) never go to personal `origin`. Work-fork git/gh needs `GH_TOKEN=$(gh auth token -u work-account)`, because the gh credential helper uses the active denniyahh account. Fetch the work clone with `--no-tags`: the v1.2.5 tag objects differ (same commit), so a tag fetch fails with 'would clobber'.
 - Brownfield: v1.2.8, codebase map in `.planning/codebase/` (mapped 2026-09-28 at `8c96e59`).
 - Five-layer architecture (CLI / Config / Builder / Client / Planner) plus parallel
   `importer`/`updater` path via `field_resolver` + `value_coercion`.
