@@ -68,7 +68,18 @@ Plans:
   3. A live `import` reports all failing rows up front instead of discovering them one 400 at a time
   4. Without credentials, `import --dry-run` still previews and says schema validation was skipped
 
-**Plans**: TBD
+**Plans**: 4 plans
+
+Plans:
+**Wave 1**
+- [ ] 02-01-PLAN.md — PRE-01/02/04: import_preflight module + structured validator; dry-run lists every failing row (SC1 tracer + PRE-02/D-07/D-10 checks), exit 1 on problems, "Schema validation skipped" without credentials, dry-run --resume parity (wave 1)
+- [ ] 02-02-PLAN.md — PRE-03 prerequisite: shared permissive `stub_createmeta` test helper applied to all live-import test clients + e2e FakeJiraClient + test_cli import stub (wave 1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [ ] 02-04-PLAN.md — PRE-01/04: D-06 deferred-required caveats, coercion errors as row errors, build-failed rows in the report, dry-run degrade/exit-code matrix (wave 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [ ] 02-03-PLAN.md — PRE-03: live import aborts before creating anything (per-row failed entries, Aborted report), unavailable warn-and-proceed, resume semantics, docs + live dry-run smoke check (wave 3)
 
 ### Phase 3: Safe User Resolution
 
