@@ -671,7 +671,11 @@ def import_command(
             dry_run=True,
             prior_report=prior_report,
         )
-        console.print(render_preview_report(result.preview, preview_rows=preview_rows))
+        # Plain text built from raw cell values: never parse it as Rich markup
+        # (a summary like "x [/] y" would raise MarkupError — T-02-08).
+        console.print(
+            render_preview_report(result.preview, preview_rows=preview_rows), markup=False
+        )
         preflight = getattr(result, "preflight", None)
         if preflight is not None:
             console.print(render_preflight_report(preflight))
@@ -733,8 +737,10 @@ def import_command(
         report.status = "failed"
     write_report_atomic(report, report_path)
 
-    console.print(render_preview_report(result.preview, preview_rows=preview_rows))
-    console.print(render_import_execution_report(result))
+    console.print(
+        render_preview_report(result.preview, preview_rows=preview_rows), markup=False
+    )
+    console.print(render_import_execution_report(result), markup=False)
     if result.failed:
         sys.exit(1)
 
