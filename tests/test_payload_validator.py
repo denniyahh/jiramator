@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-from jiramator.payload_validator import (
-    PayloadProblem,
-    find_payload_problems,
-    validate_ticket_payload,
-)
+from jiramator import payload_validator
+from jiramator.payload_validator import validate_ticket_payload
 
 # ---------------------------------------------------------------------------
 # Missing required fields
@@ -272,7 +269,7 @@ class TestImportValidatorOptions:
     def test_unknown_fix_version_flagged_when_not_skipped(self):
         fields = {"fixVersions": [{"name": "26.4.1"}]}
 
-        problems = find_payload_problems(fields, self._FIX_META, skip_allowed_value_field_ids=frozenset())
+        problems = payload_validator.find_payload_problems(fields, self._FIX_META, skip_allowed_value_field_ids=frozenset())
 
         assert [p.kind for p in problems] == ["invalid_option"]
         assert problems[0].field_id == "fixVersions"
@@ -285,10 +282,10 @@ class TestImportValidatorOptions:
     def test_off_screen_field_reported_when_enabled(self):
         fields = {"customfield_99999": "x"}
 
-        problems = find_payload_problems(fields, {}, report_off_screen_fields=True)
+        problems = payload_validator.find_payload_problems(fields, {}, report_off_screen_fields=True)
 
         assert problems == [
-            PayloadProblem(
+            payload_validator.PayloadProblem(
                 "customfield_99999",
                 "off_screen",
                 "customfield_99999 is not on the create screen for this issue type",
@@ -299,12 +296,12 @@ class TestImportValidatorOptions:
     def test_permissive_stub_reports_nothing_off_screen(self):
         fields = {"customfield_99999": "x", "summary": "s"}
 
-        assert find_payload_problems(fields, _PermissiveMeta(), report_off_screen_fields=True) == []
+        assert payload_validator.find_payload_problems(fields, _PermissiveMeta(), report_off_screen_fields=True) == []
 
     def test_blank_adf_counts_as_missing_when_enabled(self):
         fields = {"customfield_11941": _adf("   ")}
 
-        problems = find_payload_problems(fields, self._TEXTAREA_META, blank_adf_counts_as_missing=True)
+        problems = payload_validator.find_payload_problems(fields, self._TEXTAREA_META, blank_adf_counts_as_missing=True)
 
         assert [p.kind for p in problems] == ["missing_required"]
         assert problems[0].message == "missing required field 'Repositories' (customfield_11941)"
@@ -313,6 +310,6 @@ class TestImportValidatorOptions:
     def test_structured_messages_match_string_wrapper(self):
         fields = {"customfield_11941": "plain"}
 
-        structured = [p.message for p in find_payload_problems(fields, self._TEXTAREA_META)]
+        structured = [p.message for p in payload_validator.find_payload_problems(fields, self._TEXTAREA_META)]
 
         assert structured == validate_ticket_payload(fields, self._TEXTAREA_META)

@@ -110,6 +110,28 @@ class PayloadProblem:
     message: str
 
 
+def _adf_text_is_blank(value: Any) -> bool:
+    """Return whether an ADF document contains only whitespace text."""
+    if not _looks_like_adf(value):
+        return False
+
+    texts: list[str] = []
+
+    def _walk(node: Any) -> None:
+        if isinstance(node, dict):
+            text = node.get("text")
+            if isinstance(text, str):
+                texts.append(text)
+            for child in node.get("content") or []:
+                _walk(child)
+        elif isinstance(node, list):
+            for child in node:
+                _walk(child)
+
+    _walk(value)
+    return not "".join(texts).strip()
+
+
 def find_payload_problems(
     fields: dict[str, Any],
     field_metadata: dict[str, dict[str, Any]],
@@ -154,6 +176,8 @@ def find_payload_problems(
             continue
         value = fields.get(field_id)
         missing = field_id not in fields or value in (None, "", [], {})
+        if not missing and blank_adf_counts_as_missing and _adf_text_is_blank(value):
+            missing = True
         if missing:
             label = meta.get("name", field_id)
             problems.append(
@@ -170,6 +194,14 @@ def find_payload_problems(
             continue
         meta = field_metadata.get(field_id)
         if meta is None:
+            if report_off_screen_fields:
+                problems.append(
+                    PayloadProblem(
+                        field_id,
+                        "off_screen",
+                        f"{field_id} is not on the create screen for this issue type",
+                    )
+                )
             continue  # Not on this issue type's create screen.
 
         label = f"{meta.get('name', field_id)!r} ({field_id})"

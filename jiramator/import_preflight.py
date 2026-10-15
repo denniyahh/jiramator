@@ -110,16 +110,41 @@ def _missing_required_message(
     return f"{problem.message} — no spreadsheet column mapped to this field"
 
 
+def _row_headers_for_field(row_result: RowBuildResult, field_id: str) -> list[str]:
+    """Return the spreadsheet headers in this row that resolved to ``field_id``."""
+    return [
+        header
+        for header, resolved in row_result.resolved_columns.items()
+        if resolved.jira_field == field_id
+    ]
+
+
 def _row_problem_messages(
     problems: list[PayloadProblem],
+    row_result: RowBuildResult,
+    issue_type: str,
     alias_headers: dict[str, list[str]],
 ) -> list[str]:
     messages: list[str] = []
     for problem in problems:
         if problem.kind == "missing_required":
             messages.append(_missing_required_message(problem, alias_headers))
+            continue
+        headers = _row_headers_for_field(row_result, problem.field_id)
+        if problem.kind == "off_screen":
+            source = (
+                f"column {_quote_join(headers)}" if headers else "bulk_create.defaults"
+            )
+            messages.append(
+                f"{problem.field_id} is mapped from {source} but is not on the "
+                f"create screen for {issue_type}"
+            )
+            continue
+        if headers:
+            suffix = f" — from column {_quote_join(headers)}"
         else:
-            messages.append(problem.message)
+            suffix = " — from bulk_create.defaults"
+        messages.append(f"{problem.message}{suffix}")
     return messages
 
 
@@ -237,13 +262,17 @@ def run_preflight(
                 payload_fields,
                 field_metadata,
                 skip_allowed_value_field_ids=_IMPORT_SKIP_ALLOWED_VALUE_FIELD_IDS,
+                report_off_screen_fields=True,
+                blank_adf_counts_as_missing=True,
             )
             preflight_rows.append(
                 PreflightRow(
                     row_number=row_result.row_number,
                     summary=row_result.summary,
                     issue_type=issue_type_name,
-                    problems=_row_problem_messages(problems, alias_headers),
+                    problems=_row_problem_messages(
+                        problems, row_result, issue_type_name, alias_headers
+                    ),
                 )
             )
     except (JiraApiError, requests.exceptions.RequestException) as exc:
