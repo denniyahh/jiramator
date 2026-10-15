@@ -532,3 +532,204 @@ class TestBackwardCompat:
             client=client,
         )
         assert result.created == [(1, "X", "CA-1")]
+
+
+# ---------------------------------------------------------------------------
+# Plan 02-03: live preflight abort (PRE-03, D-01, D-11)
+# ---------------------------------------------------------------------------
+
+
+def _api_impact_createmeta() -> dict[str, dict]:
+    """Risk createmeta where API Impact only accepts Yes/No."""
+    return {
+        "summary": {"name": "Summary", "required": True, "schema": {"type": "string"}},
+        "issuetype": {"name": "Issue Type", "required": True, "schema": {"type": "issuetype"}},
+        "project": {"name": "Project", "required": True, "schema": {"type": "project"}},
+        "customfield_10273": {
+            "name": "API Impact",
+            "required": False,
+            "schema": {"type": "array", "items": "option"},
+            "allowedValues": [{"id": "1", "value": "Yes"}, {"id": "2", "value": "No"}],
+        },
+    }
+
+
+def _abort_client(createmeta: dict[str, dict] | None = None) -> MagicMock:
+    return stub_createmeta(
+        MagicMock(),
+        fields_by_type={"Risk": createmeta if createmeta is not None else _api_impact_createmeta()},
+    )
+
+
+class TestRunImportPreflightAbort:
+    def test_mixed_sheet_records_only_failing_rows(self, tmp_path):
+        rows = [
+            {"Summary": "Risk A", "API Impact": "Maybe"},
+            {"Summary": "Risk B", "API Impact": "No"},
+            {"Summary": "Risk C", "API Impact": "Perhaps"},
+        ]
+        client = _abort_client()
+        report = _new_report()
+        report_path = tmp_path / "r.json"
+
+        result = run_import(
+            rows,
+            org_config=_org_config(),
+            team_config=_team_config(),
+            jira_fields=[],
+            client=client,
+            report=report,
+            report_path=report_path,
+        )
+
+        client.create_issue.assert_not_called()
+        client.create_issues_bulk.assert_not_called()
+        client.find_issue_keys_by_summaries.assert_not_called()
+        client.find_user_account_id.assert_not_called()
+        assert result.preflight is not None and result.preflight.status == "problems"
+        assert result.created == [] and result.skipped == []
+        assert [row for row, _, _ in result.failed] == [1, 3]
+
+        run = _read_report(report_path)["run"]
+        assert run["error"]["type"] == "Aborted"
+        assert run["error"]["message"] == (
+            "Preflight found problems in 2 of 3 row(s). No issues were created."
+        )
+        assert [i["template_key"] for i in run["issues"]] == [
+            _row_template_key(1, "Risk A"),
+            _row_template_key(3, "Risk C"),
+        ]
+        assert all(i["status"] == "failed" and i["kind"] == "imported" for i in run["issues"])
+        assert "'Maybe'" in run["issues"][0]["error"]
+        assert run["counts"].get("failed") == 2
+        assert run["counts"].get("created", 0) == 0
+
+    def test_abort_error_redacts_token(self, tmp_path, monkeypatch):
+        secret = "tok-SECRET-abcdef123"
+        org = _org_config()
+        monkeypatch.setenv(org.jira_email_env, "me@example.com")
+        monkeypatch.setenv(org.jira_token_env, secret)
+        client = _abort_client()
+        report_path = tmp_path / "r.json"
+
+        run_import(
+            [{"Summary": "Risk A", "API Impact": f"leak {secret}"}],
+            org_config=org,
+            team_config=_team_config(),
+            jira_fields=[],
+            client=client,
+            report=_new_report(),
+            report_path=report_path,
+        )
+
+        text = report_path.read_text(encoding="utf-8")
+        assert secret not in text
+        run = json.loads(text)["run"]
+        assert run["issues"][0]["status"] == "failed"
+        assert "***" in run["issues"][0]["error"]
+        client.create_issue.assert_not_called()
+
+    def test_duplicate_summary_rows_get_separate_entries(self, tmp_path):
+        """OQ-3: rows that would be dedup-skipped are still validated, and
+        duplicate summaries in the sheet get one entry per row."""
+        rows = [
+            {"Summary": "Same", "API Impact": "Bad"},
+            {"Summary": "Same", "API Impact": "Bad"},
+        ]
+        client = _abort_client()
+        client.find_issue_keys_by_summaries.return_value = {"Same": "CA-1"}
+        report_path = tmp_path / "r.json"
+
+        run_import(
+            rows,
+            org_config=_org_config(),
+            team_config=_team_config(),
+            jira_fields=[],
+            client=client,
+            report=_new_report(),
+            report_path=report_path,
+        )
+
+        run = _read_report(report_path)["run"]
+        assert [i["template_key"] for i in run["issues"]] == [
+            _row_template_key(1, "Same"),
+            _row_template_key(2, "Same"),
+        ]
+        client.find_issue_keys_by_summaries.assert_not_called()
+
+
+class TestStubCreatemetaThroughPreflight:
+    """Plan 02 stub contract proven through the real preflight."""
+
+    def test_stub_createmeta_passes_live_shaped_rows(self):
+        from jiramator.import_preflight import run_preflight
+        from jiramator.importer import (
+            _DEFERRED_FIELDS,
+            _DEFERRED_LOGICAL_FIELDS,
+            build_preview_report,
+        )
+
+        org = _org_config()
+        org.custom_fields["repositories"] = "customfield_11941"
+        org.bulk_create.field_aliases.update(
+            {"Repositories": "repositories", "Description": "description", "Reporter": "reporter"}
+        )
+        rows = [
+            {
+                "Summary": "Risk A",
+                "API Impact": "No",
+                "Repositories": "repo-alpha",
+                "Description": "plain text description",
+                "Reporter": "Synthetic Person",
+            }
+        ]
+        preview = build_preview_report(
+            rows, org_config=org, team_config=_team_config(), jira_fields=[]
+        )
+        assert preview.failed_rows == 0
+        fields = preview.row_results[0].payload["fields"]
+        assert "customfield_11941" in fields and "customfield_10273" in fields
+        assert "reporter" not in fields  # deferred
+
+        result = run_preflight(
+            stub_createmeta(MagicMock()),
+            project_key="CA",
+            row_results=preview.row_results,
+            source_rows=rows,
+            org_config=org,
+            template_key_fn=_row_template_key,
+            deferred_fields=frozenset(_DEFERRED_FIELDS),
+            deferred_logical_fields=frozenset(_DEFERRED_LOGICAL_FIELDS),
+        )
+
+        assert result.status == "passed"
+        assert result.problem_rows == []
+        assert all(not row.caveats for row in result.rows)
+
+    def test_e2e_fake_client_passes(self, tmp_path):
+        from jiramator.config import load_org_config
+        from jiramator.import_preflight import run_preflight
+        from jiramator.importer import build_preview_report
+        from tests.test_cli_e2e import FakeJiraClient, _write_import_org_config
+
+        org_path = tmp_path / "org.yaml"
+        _write_import_org_config(org_path)
+        org, _ = load_org_config(org_path)
+        # Lower-case header: the e2e import sheets use the standard field name.
+        rows = [{"summary": "Imported A"}, {"summary": "Imported B"}]
+        team = TeamConfig(project_key="TST", team_name="TestTeam")
+        preview = build_preview_report(rows, org_config=org, team_config=team, jira_fields=[])
+
+        result = run_preflight(
+            FakeJiraClient(),
+            project_key="TST",
+            row_results=preview.row_results,
+            source_rows=rows,
+            org_config=org,
+            template_key_fn=_row_template_key,
+        )
+
+        assert result.status == "passed"
+        assert result.checked_rows == 2
+        assert result.problem_rows == []
+        assert all(not row.caveats for row in result.rows)

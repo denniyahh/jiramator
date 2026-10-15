@@ -16,6 +16,7 @@ from jiramator.jira_client import JiraApiError, JiraClient
 from jiramator.run_report import (
     IssueResult,
     RunReport,
+    abort_info,
     credential_secrets,
     error_info,
     sanitize_message,
@@ -381,6 +382,42 @@ def run_import(
 
     _persist()  # initial write reflecting prior-carry-forward
 
+    # ---- Preflight (D-01/D-08): validate every row a live run would attempt,
+    # before any Jira read used for creation (summary dedup, parent/sprint/user
+    # lookups) and before any write. Rows already created by a prior run are
+    # not validated. Any problem aborts the whole run with nothing created.
+    preflight = run_preflight(
+        client,
+        project_key=team_config.project_key,
+        row_results=preview.row_results,
+        source_rows=rows,
+        org_config=org_config,
+        skip_template_keys=frozenset(prior_created),
+        template_key_fn=_row_template_key,
+        deferred_fields=frozenset(_DEFERRED_FIELDS),
+        deferred_logical_fields=frozenset(_DEFERRED_LOGICAL_FIELDS),
+    )
+    if preflight.status == "problems":
+        aborted: list[tuple[int, str, str]] = []
+        for problem_row in sorted(preflight.problem_rows, key=lambda r: r.row_number):
+            joined = "; ".join(problem_row.problems)
+            _record(
+                _row_template_key(problem_row.row_number, problem_row.summary),
+                "failed",
+                error=joined,
+            )
+            aborted.append((problem_row.row_number, problem_row.summary, joined))
+        if report is not None:
+            report.error = abort_info(
+                f"Preflight found problems in {len(preflight.problem_rows)} of "
+                f"{preflight.considered_rows} row(s). No issues were created.",
+                secrets=secrets,
+            )
+        _persist()
+        return ImportRunResult(
+            preview=preview, created=[], skipped=[], failed=aborted, preflight=preflight
+        )
+
     successful_rows = [
         result for result in preview.row_results
         if result.success and result.payload
@@ -571,6 +608,7 @@ def run_import(
         created=created,
         skipped=skipped,
         failed=failed,
+        preflight=preflight,
     )
 
 

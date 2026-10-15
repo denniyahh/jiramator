@@ -723,6 +723,21 @@ def import_command(
         _record_import_failure(report, report_path, exc, org_config)
         raise
 
+    # getattr: hand-rolled results (e.g. test stubs) may lack the attribute.
+    preflight = getattr(result, "preflight", None)
+    if preflight is not None and preflight.status == "problems":
+        # D-01/D-11: preflight aborted the run before anything was created.
+        # The report keeps status "failed" (never "partial").
+        report.ended_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+        report.status = "failed"
+        write_report_atomic(report, report_path)
+        console.print(
+            render_preview_report(result.preview, preview_rows=preview_rows), markup=False
+        )
+        console.print(render_preflight_report(preflight))
+        console.print("[red bold]Aborting — fix the rows above. No issues were created.[/]")
+        sys.exit(1)
+
     # Finalize report status.
     report.ended_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
     failed_count = report.counts.get("failed", 0)

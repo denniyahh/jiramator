@@ -20,6 +20,7 @@ from jiramator.run_report import (
     compute_resolved_hash,
     write_report_atomic,
 )
+from tests.conftest import stub_createmeta
 
 
 @pytest.fixture
@@ -216,8 +217,8 @@ class TestImportCommand:
             {"Summary": "Risk B", "API Impact": "No"},
         ]
         row_results = [
-            MagicMock(success=True, row_number=1, summary="Risk A", payload={"fields": {"summary": "Risk A"}}, warnings=[], error=None),
-            MagicMock(success=True, row_number=2, summary="Risk B", payload={"fields": {"summary": "Risk B"}}, warnings=[], error=None),
+            MagicMock(success=True, row_number=1, summary="Risk A", payload={"fields": {"summary": "Risk A", "issuetype": {"name": "Risk"}}}, warnings=[], error=None, resolved_columns={}),
+            MagicMock(success=True, row_number=2, summary="Risk B", payload={"fields": {"summary": "Risk B", "issuetype": {"name": "Risk"}}}, warnings=[], error=None, resolved_columns={}),
         ]
         preview_report = MagicMock(total_rows=2, successful_rows=2, failed_rows=0, row_results=row_results)
 
@@ -229,6 +230,7 @@ class TestImportCommand:
         client.get_fields.return_value = []
         client.find_issue_keys_by_summaries.return_value = {"Risk A": "CA-4999"}
         client.create_issue.side_effect = [JiraApiError("boom")]
+        stub_createmeta(client)
         monkeypatch.setattr("jiramator.cli.JiraClient", lambda org_config: client)
 
         result = runner.invoke(
@@ -928,3 +930,135 @@ class TestImportPreflightDryRun:
         assert "Row 7 '<missing summary>':" in output
         assert "Row 7: required field 'summary' is missing or empty" in output
         assert "7 of 7 rows have problems" in output
+
+
+def _invoke_live(
+    runner: CliRunner,
+    org_config_path: Path,
+    team_config_path: Path,
+    sheet_path: Path,
+    *extra: str,
+):
+    return runner.invoke(
+        cli,
+        [
+            "import",
+            "--org-config",
+            str(org_config_path),
+            "--team-config",
+            str(team_config_path),
+            *extra,
+            str(sheet_path),
+        ],
+    )
+
+
+class TestImportPreflightLiveAbort:
+    def test_live_sc1_aborts_before_create_exit_1(
+        self, runner, monkeypatch, org_config_path, team_config_path, tmp_path
+    ):
+        """PRE-03/SC3: any problem row aborts the live run before any write."""
+        client = _preflight_client()
+        monkeypatch.setattr("jiramator.cli.JiraClient", MagicMock(return_value=client))
+        report_path = tmp_path / "report.json"
+
+        result = _invoke_live(
+            runner,
+            org_config_path,
+            team_config_path,
+            _write_sc1_sheet(tmp_path),
+            "--report",
+            str(report_path),
+        )
+
+        output = _flat(result.output)
+        assert result.exit_code == 1, output
+        assert "6 of 6 rows have problems" in output
+        assert "Aborting — fix the rows above. No issues were created." in output
+
+        client.create_issue.assert_not_called()
+        client.create_issues_bulk.assert_not_called()
+        client.find_issue_keys_by_summaries.assert_not_called()
+        client.find_user_account_id.assert_not_called()
+
+        run = json.loads(report_path.read_text(encoding="utf-8"))["run"]
+        assert run["status"] == "failed"
+        assert run["ended_at"]
+        assert run["error"]["type"] == "Aborted"
+        assert run["error"]["message"].startswith("Preflight found problems in 6 of 6 row(s)")
+        issues = run["issues"]
+        assert len(issues) == 6
+        for n, issue in enumerate(issues, start=1):
+            assert issue["kind"] == "imported"
+            assert issue["status"] == "failed"
+            assert issue["template_key"] == _row_template_key(n, f"Synthetic risk {n}")
+            assert "Fix versions" in issue["error"]
+        assert "customfield_11941" in issues[1]["error"]
+        assert "; " in issues[1]["error"]  # two problems joined
+
+    def test_live_abort_prints_caveats(
+        self, runner, monkeypatch, org_config_path, team_config_path, tmp_path
+    ):
+        """D-06: caveats on a failing row are shown in the live abort output."""
+        sheet_path = tmp_path / "risks.csv"
+        sheet_path.write_text("Summary,Reporter\nSynthetic risk 1,Synthetic Person\n")
+        createmeta = {
+            "summary": {"name": "Summary", "required": True, "schema": {"type": "string"}},
+            "issuetype": {"name": "Issue Type", "required": True, "schema": {"type": "issuetype"}},
+            "project": {"name": "Project", "required": True, "schema": {"type": "project"}},
+            "reporter": {"name": "Reporter", "required": True, "schema": {"type": "user"}},
+            "customfield_11941": {
+                "name": "Repositories",
+                "required": True,
+                "schema": {"type": "string"},
+            },
+        }
+        client = _preflight_client(createmeta)
+        monkeypatch.setattr("jiramator.cli.JiraClient", MagicMock(return_value=client))
+
+        result = _invoke_live(
+            runner, org_config_path, team_config_path, sheet_path,
+            "--report", str(tmp_path / "r.json"),
+        )
+
+        output = _flat(result.output)
+        assert result.exit_code == 1, output
+        assert "not preflight-validated" in output
+        assert "1 of 1 rows have problems" in output
+        client.create_issue.assert_not_called()
+        client.find_user_account_id.assert_not_called()
+
+    def test_live_all_rows_pass_creates_without_caveat_output(
+        self, runner, monkeypatch, org_config_path, team_config_path, tmp_path
+    ):
+        """Passing live runs print no preflight section (caveats included)."""
+        sheet_path = tmp_path / "risks.csv"
+        sheet_path.write_text(
+            "Summary,Reporter\nSynthetic risk 1,Synthetic Person\nSynthetic risk 2,Other Person\n"
+        )
+        createmeta = {
+            "summary": {"name": "Summary", "required": True, "schema": {"type": "string"}},
+            "issuetype": {"name": "Issue Type", "required": True, "schema": {"type": "issuetype"}},
+            "project": {"name": "Project", "required": True, "schema": {"type": "project"}},
+            "reporter": {"name": "Reporter", "required": True, "schema": {"type": "user"}},
+        }
+        client = _preflight_client(createmeta)
+        client.find_issue_keys_by_summaries.return_value = {}
+        client.find_user_account_id.return_value = "acc-1"
+        client.create_issue.side_effect = ["CA-1", "CA-2"]
+        monkeypatch.setattr("jiramator.cli.JiraClient", MagicMock(return_value=client))
+        report_path = tmp_path / "r.json"
+
+        result = _invoke_live(
+            runner, org_config_path, team_config_path, sheet_path,
+            "--report", str(report_path),
+        )
+
+        output = _flat(result.output)
+        assert result.exit_code == 0, output
+        assert client.create_issue.call_count == 2
+        assert "not preflight-validated" not in output.lower()
+        assert "Schema validation" not in output
+        run = json.loads(report_path.read_text(encoding="utf-8"))["run"]
+        assert run["status"] == "success"
+        assert run.get("error") is None
