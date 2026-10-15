@@ -540,6 +540,7 @@ def stub_run_import(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         created: list = []
         skipped: list = []
         failed: list = []
+        preflight = None
 
     def _recorder(*args: Any, **kwargs: Any) -> Any:
         captured["args"] = args

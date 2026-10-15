@@ -4,6 +4,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from jiramator.config import BulkCreateConfig, OrgConfig, TeamConfig
+from tests.conftest import stub_createmeta
 
 
 def _org_config() -> OrgConfig:
@@ -352,6 +353,7 @@ class TestRunImport:
             {"Summary": "Risk B", "API Impact": "No"},
         ]
         client = MagicMock()
+        stub_createmeta(client)
         client.find_issue_keys_by_summaries.return_value = {"Risk A": "CA-4999"}
         client.create_issue.side_effect = [JiraApiError("boom")]
 
@@ -376,6 +378,7 @@ class TestRunImport:
         rows = [{"Summary": "Risk A", "Reporter": "Dennis Kim"}]
         jira_fields = [{"id": "reporter", "name": "Reporter"}]
         client = MagicMock()
+        stub_createmeta(client)
         client.find_issue_keys_by_summaries.return_value = {}
         client.find_user_account_id.return_value = "acct-123"
         client.create_issue.return_value = "CA-5001"
@@ -402,6 +405,7 @@ class TestRunImport:
 
         rows = [{"Summary": "Risk B", "Report Author": "Jane Doe"}]
         client = MagicMock()
+        stub_createmeta(client)
         client.find_issue_keys_by_summaries.return_value = {}
         client.find_user_account_id.return_value = "acct-456"
         client.create_issue.return_value = "CA-5002"
@@ -426,6 +430,7 @@ class TestRunImport:
 
         rows = [{"Summary": "Risk A", "Assignee": "Jane Doe"}]
         client = MagicMock()
+        stub_createmeta(client)
         client.find_issue_keys_by_summaries.return_value = {}
         client.find_user_account_id.return_value = "acct-789"
         client.create_issue.return_value = "CA-5003"
@@ -450,6 +455,7 @@ class TestRunImport:
 
         rows = [{"Summary": "Risk A", "Assignee": "Nobody Real"}]
         client = MagicMock()
+        stub_createmeta(client)
         client.find_issue_keys_by_summaries.return_value = {}
         client.find_user_account_id.return_value = None
         client.create_issue.return_value = "CA-5004"
@@ -474,6 +480,7 @@ class TestRunImport:
 
         rows = [{"Summary": "Risk A", "Parent": "CA-5079"}]
         client = MagicMock()
+        stub_createmeta(client)
         client.find_issue_keys_by_summaries.return_value = {}
         client.create_issue.return_value = "CA-5005"
 
@@ -501,6 +508,7 @@ class TestRunImport:
 
         rows = [{"Summary": "Risk A", "Parent": "Miscellaneous Work"}]
         client = MagicMock()
+        stub_createmeta(client)
 
         def _find_issue_keys(project_key, summaries):
             if summaries == ["Miscellaneous Work"]:
@@ -530,6 +538,7 @@ class TestRunImport:
 
         rows = [{"Summary": "Risk A", "Parent": "Nonexistent Epic"}]
         client = MagicMock()
+        stub_createmeta(client)
         client.find_issue_keys_by_summaries.return_value = {}
         client.create_issue.return_value = "CA-5007"
 
@@ -554,6 +563,7 @@ class TestRunImport:
 
         rows = [{"Summary": "Risk A", "Sprint": "15873"}]
         client = MagicMock()
+        stub_createmeta(client)
         client.find_issue_keys_by_summaries.return_value = {}
         client.create_issue.return_value = "CA-6001"
 
@@ -581,6 +591,7 @@ class TestRunImport:
 
         rows = [{"Summary": "Risk A", "Sprint": "PI-28.6-Calc -TI83"}]
         client = MagicMock()
+        stub_createmeta(client)
         client.find_issue_keys_by_summaries.return_value = {}
         client.get_board_sprints.return_value = [
             {"id": 15873, "name": "PI-28.6-Calc -TI83", "state": "active"},
@@ -612,6 +623,7 @@ class TestRunImport:
 
         rows = [{"Summary": "Risk A", "Sprint": "Nonexistent Sprint"}]
         client = MagicMock()
+        stub_createmeta(client)
         client.find_issue_keys_by_summaries.return_value = {}
         client.get_board_sprints.return_value = []
         client.create_issue.return_value = "CA-6003"
@@ -638,6 +650,7 @@ class TestRunImport:
 
         rows = [{"Summary": "Risk A", "Sprint": "PI-28.6-Calc -TI83"}]
         client = MagicMock()
+        stub_createmeta(client)
         client.find_issue_keys_by_summaries.return_value = {}
         client.create_issue.return_value = "CA-6004"
 

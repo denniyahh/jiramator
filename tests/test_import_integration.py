@@ -9,6 +9,7 @@ from openpyxl import Workbook
 from jiramator.config import load_org_config, load_team_config
 from jiramator.importer import run_import
 from jiramator.spreadsheet import read_spreadsheet
+from tests.conftest import stub_createmeta
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _ORG_CONFIG_PATH = _REPO_ROOT / "configs" / "org.example" / "example.yaml"
@@ -194,6 +195,8 @@ class TestImportIntegration:
         assert "reporter" not in row_result.payload["fields"]
 
         client = MagicMock()
+
+        stub_createmeta(client)
         client.find_issue_keys_by_summaries.return_value = {}
         client.find_user_account_id.return_value = "acct-123"
         client.create_issue.return_value = "CA-9999"

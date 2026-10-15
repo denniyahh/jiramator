@@ -22,6 +22,7 @@ import pytest
 from click.testing import CliRunner
 
 from jiramator.cli import cli
+from tests.conftest import PermissiveFieldMeta
 
 # ---------------------------------------------------------------------------
 # Shared FakeJiraClient (mirrors tests/test_planner_report.py's double)
@@ -86,6 +87,19 @@ class FakeJiraClient:
     def find_user_account_id(self, name: str) -> str | None:  # pragma: no cover
         return None
 
+    def get_createmeta_issue_types(self, project_key: str) -> list[dict]:
+        # Import preflight: the project offers "Task" (the import org
+        # config's bulk_create default).
+        return [{"id": "1", "name": "Task", "subtask": False}]
+
+    def get_createmeta_fields(
+        self, project_key: str, issue_type_id: str
+    ) -> dict[str, dict]:
+        # Every sent field is on-screen and optional, so the import
+        # preflight finds zero problems (a bare {} would flag every field
+        # off-screen under report_off_screen_fields=True).
+        return PermissiveFieldMeta({})
+
     def get_createmeta_fields_by_type_name(
         self, project_key: str, issue_type_name: str
     ) -> dict[str, dict]:
@@ -110,6 +124,29 @@ sprints:
   standard_length_weeks: 2
   long_length_weeks: 3
   long_sprints: []
+""",
+        encoding="utf-8",
+    )
+
+
+def _write_import_org_config(path: Path) -> None:
+    """Minimal org config for import tests: rows default to issue type Task.
+
+    Separate from ``_write_org_config`` so plan tests (and their resolved
+    config hash) are unaffected.
+    """
+    path.write_text(
+        """\
+jira_url: https://example.atlassian.net
+custom_fields: {}
+sprints:
+  count: 2
+  standard_length_weeks: 2
+  long_length_weeks: 3
+  long_sprints: []
+bulk_create:
+  defaults:
+    issuetype: Task
 """,
         encoding="utf-8",
     )
@@ -353,6 +390,9 @@ class TestE3EncodingRoundTrip:
         with pytest.raises(UnicodeDecodeError):
             sheet.read_text(encoding="utf-8")
 
+        import_org = tmp_path / "import_org.yaml"
+        _write_import_org_config(import_org)
+
         fake = FakeJiraClient()
         monkeypatch.setattr("jiramator.cli.JiraClient", lambda *a, **kw: fake)
 
@@ -361,7 +401,7 @@ class TestE3EncodingRoundTrip:
             [
                 "import",
                 "--org-config",
-                str(configs["org"]),
+                str(import_org),
                 "--team-config",
                 str(configs["team"]),
                 str(sheet),
