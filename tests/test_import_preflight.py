@@ -579,6 +579,20 @@ class TestPreflightDeferred:
             "not preflight-validated"
         ]
 
+    def test_non_string_deferred_cell_is_missing_required(self):
+        # run_import only resolves str cells, so a non-str cell is never "present".
+        client = _client(fields=_deferred_createmeta(customfield_10021=_REQUIRED_SPRINT))
+        rows = [{"Summary": "Synthetic A", "Sprint": 5}]
+
+        result = _deferred_preflight(client, rows)
+
+        assert result.status == "problems"
+        assert result.rows[0].caveats == []
+        assert any(
+            "missing required field 'Sprint' (customfield_10021)" in p
+            for p in result.rows[0].problems
+        )
+
     def test_reporter_column_not_on_create_screen_is_off_screen_problem(self):
         client = _client(fields=_deferred_createmeta())
         rows = [{"Summary": "Synthetic A", "Reporter": "Synthetic User"}]

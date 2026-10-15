@@ -147,7 +147,10 @@ def _deferred_present(
             continue
         if field_id not in deferred_fields and resolved.logical_name not in deferred_logical_fields:
             continue
-        if not str(source_row.get(header, "") or "").strip():
+        # Same predicate run_import uses at create time, so preflight never
+        # treats as "present" a cell the live lookup would skip.
+        raw_value = source_row.get(header)
+        if not isinstance(raw_value, str) or not raw_value.strip():
             continue
         present.setdefault(
             field_id,
