@@ -1062,3 +1062,70 @@ class TestImportPreflightLiveAbort:
         run = json.loads(report_path.read_text(encoding="utf-8"))["run"]
         assert run["status"] == "success"
         assert run.get("error") is None
+
+
+class TestImportPreflightLiveUnavailable:
+    def _assert_proceeds(self, result, client, report_path):
+        output = _flat(result.output)
+        assert result.exit_code == 0, output
+        assert "Schema validation skipped" in output
+        assert "may surface as Jira 400" in output
+        assert client.create_issue.call_count == 6
+        run = json.loads(report_path.read_text(encoding="utf-8"))["run"]
+        assert run["status"] == "success"
+        assert run["counts"]["created"] == 6
+
+    def _client(self) -> MagicMock:
+        client = _preflight_client()
+        client.find_issue_keys_by_summaries.return_value = {}
+        client.create_issue.side_effect = [f"CA-{n}" for n in range(1, 7)]
+        return client
+
+    def test_createmeta_connection_error_warns_and_creates(
+        self, runner, monkeypatch, org_config_path, team_config_path, tmp_path
+    ):
+        """D-02: createmeta unreachable on a live run → loud warning, proceed."""
+        client = self._client()
+        client.get_createmeta_issue_types.side_effect = requests.exceptions.ConnectionError("down")
+        monkeypatch.setattr("jiramator.cli.JiraClient", MagicMock(return_value=client))
+        report_path = tmp_path / "r.json"
+
+        result = _invoke_live(
+            runner, org_config_path, team_config_path, _write_sc1_sheet(tmp_path),
+            "--report", str(report_path),
+        )
+
+        self._assert_proceeds(result, client, report_path)
+
+    def test_createmeta_fields_403_warns_and_creates(
+        self, runner, monkeypatch, org_config_path, team_config_path, tmp_path
+    ):
+        client = self._client()
+        client.get_createmeta_fields.side_effect = JiraApiError("Forbidden", status_code=403)
+        monkeypatch.setattr("jiramator.cli.JiraClient", MagicMock(return_value=client))
+        report_path = tmp_path / "r.json"
+
+        result = _invoke_live(
+            runner, org_config_path, team_config_path, _write_sc1_sheet(tmp_path),
+            "--report", str(report_path),
+        )
+
+        self._assert_proceeds(result, client, report_path)
+
+    def test_markup_in_unavailable_reason_is_escaped(
+        self, runner, monkeypatch, org_config_path, team_config_path, tmp_path
+    ):
+        client = self._client()
+        client.get_createmeta_issue_types.side_effect = requests.exceptions.ConnectionError(
+            "bad [/] gateway"
+        )
+        monkeypatch.setattr("jiramator.cli.JiraClient", MagicMock(return_value=client))
+        report_path = tmp_path / "r.json"
+
+        result = _invoke_live(
+            runner, org_config_path, team_config_path, _write_sc1_sheet(tmp_path),
+            "--report", str(report_path),
+        )
+
+        assert "bad [/] gateway" in _flat(result.output)
+        self._assert_proceeds(result, client, report_path)

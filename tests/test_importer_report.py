@@ -733,3 +733,219 @@ class TestStubCreatemetaThroughPreflight:
         assert result.checked_rows == 2
         assert result.problem_rows == []
         assert all(not row.caveats for row in result.rows)
+
+
+class TestRunImportPreflightResume:
+    def _prior(self, *issues: IssueResult) -> RunReport:
+        return RunReport(issues=list(issues))
+
+    def test_prior_created_row_is_not_validated(self, tmp_path):
+        """D-08: a row created by the prior run is not validated, so its
+        (now invalid) value cannot abort the resume."""
+        rows = [
+            {"Summary": "Risk A", "API Impact": "Maybe"},
+            {"Summary": "Risk B", "API Impact": "No"},
+        ]
+        tk_a = _row_template_key(1, "Risk A")
+        prior = self._prior(
+            IssueResult(template_key=tk_a, kind="imported", status="created", jira_key="CA-1")
+        )
+        client = _abort_client()
+        client.find_issue_keys_by_summaries.return_value = {}
+        client.create_issue.side_effect = ["CA-2"]
+        report_path = tmp_path / "r.json"
+
+        result = run_import(
+            rows,
+            org_config=_org_config(),
+            team_config=_team_config(),
+            jira_fields=[],
+            client=client,
+            report=_new_report(),
+            report_path=report_path,
+            prior_report=prior,
+        )
+
+        assert result.preflight is not None and result.preflight.status == "passed"
+        assert result.preflight.considered_rows == 1
+        assert client.create_issue.call_count == 1
+        run = _read_report(report_path)["run"]
+        failed_keys = [i["template_key"] for i in run["issues"] if i["status"] == "failed"]
+        assert tk_a not in failed_keys
+        assert run.get("error") is None
+
+    def test_resume_after_abort_revalidates_and_creates_every_row(self, tmp_path):
+        """D-11: an aborted report created nothing → resume attempts every row."""
+        rows = [
+            {"Summary": "Risk A", "API Impact": "No"},
+            {"Summary": "Risk B", "API Impact": "Yes"},
+        ]
+        prior = self._prior(
+            IssueResult(
+                template_key=_row_template_key(1, "Risk A"), kind="imported",
+                status="failed", error="old problem",
+            ),
+            IssueResult(
+                template_key=_row_template_key(2, "Risk B"), kind="imported",
+                status="failed", error="old problem",
+            ),
+        )
+        client = _abort_client()
+        client.find_issue_keys_by_summaries.return_value = {}
+        client.create_issue.side_effect = ["CA-1", "CA-2"]
+        report_path = tmp_path / "r.json"
+
+        result = run_import(
+            rows,
+            org_config=_org_config(),
+            team_config=_team_config(),
+            jira_fields=[],
+            client=client,
+            report=_new_report(),
+            report_path=report_path,
+            prior_report=prior,
+        )
+
+        assert result.preflight is not None
+        assert result.preflight.checked_rows == 2
+        assert result.preflight.status == "passed"
+        assert client.create_issue.call_count == 2
+        run = _read_report(report_path)["run"]
+        assert [i["status"] for i in run["issues"]] == ["created", "created"]
+
+    def test_resumed_abort_keeps_carried_forward_created(self, tmp_path):
+        rows = [
+            {"Summary": "Risk A", "API Impact": "No"},
+            {"Summary": "Risk B", "API Impact": "Maybe"},
+        ]
+        tk_a = _row_template_key(1, "Risk A")
+        prior = self._prior(
+            IssueResult(template_key=tk_a, kind="imported", status="created", jira_key="CA-1")
+        )
+        client = _abort_client()
+        report_path = tmp_path / "r.json"
+
+        result = run_import(
+            rows,
+            org_config=_org_config(),
+            team_config=_team_config(),
+            jira_fields=[],
+            client=client,
+            report=_new_report(),
+            report_path=report_path,
+            prior_report=prior,
+        )
+
+        client.create_issue.assert_not_called()
+        assert result.preflight is not None and result.preflight.status == "problems"
+        run = _read_report(report_path)["run"]
+        assert run["issues"][0] == {
+            **run["issues"][0],
+            "template_key": tk_a,
+            "status": "created",
+            "jira_key": "CA-1",
+        }
+        assert run["issues"][1]["template_key"] == _row_template_key(2, "Risk B")
+        assert run["issues"][1]["status"] == "failed"
+        assert run["counts"]["created"] == 1
+        assert run["counts"]["failed"] == 1
+        assert run["error"]["message"] == (
+            "Preflight found problems in 1 of 1 row(s). No issues were created."
+        )
+
+    def test_build_failed_row_aborts_with_build_error(self, tmp_path):
+        """D-08: an empty-Summary row is part of the abort list with its
+        build error; nothing is created."""
+        rows = [
+            {"Summary": "Risk A", "API Impact": "No"},
+            {"Summary": "", "API Impact": "No"},
+            {"Summary": "Risk C", "API Impact": "No"},
+        ]
+        client = _abort_client()
+        report_path = tmp_path / "r.json"
+
+        result = run_import(
+            rows,
+            org_config=_org_config(),
+            team_config=_team_config(),
+            jira_fields=[],
+            client=client,
+            report=_new_report(),
+            report_path=report_path,
+        )
+
+        client.create_issue.assert_not_called()
+        assert [row for row, _, _ in result.failed] == [2]
+        run = _read_report(report_path)["run"]
+        assert len(run["issues"]) == 1
+        assert run["issues"][0]["error"] == "Row 2: required field 'summary' is missing or empty"
+        assert run["issues"][0]["template_key"] == _row_template_key(2, "<missing summary>")
+
+    def test_all_rows_pass_creates_as_today(self, tmp_path):
+        rows = [
+            {"Summary": "Risk A", "API Impact": "No"},
+            {"Summary": "Risk B", "API Impact": "Yes"},
+        ]
+        client = _abort_client()
+        client.find_issue_keys_by_summaries.return_value = {}
+        client.create_issue.side_effect = ["CA-1", "CA-2"]
+
+        result = run_import(
+            rows,
+            org_config=_org_config(),
+            team_config=_team_config(),
+            jira_fields=[],
+            client=client,
+            report=_new_report(),
+            report_path=tmp_path / "r.json",
+        )
+
+        assert result.preflight is not None and result.preflight.status == "passed"
+        assert [key for _, _, key in result.created] == ["CA-1", "CA-2"]
+        assert result.failed == []
+
+    def test_zero_data_rows_makes_no_createmeta_call(self, tmp_path):
+        client = _abort_client()
+        client.find_issue_keys_by_summaries.return_value = {}
+
+        result = run_import(
+            [],
+            org_config=_org_config(),
+            team_config=_team_config(),
+            jira_fields=[],
+            client=client,
+            report=_new_report(),
+            report_path=tmp_path / "r.json",
+        )
+
+        client.get_createmeta_issue_types.assert_not_called()
+        client.get_createmeta_fields.assert_not_called()
+        client.create_issue.assert_not_called()
+        assert result.failed == []
+
+    def test_unavailable_proceeds_and_records_build_failures_as_today(self, tmp_path):
+        """D-02 + build-failed rows when validation is unavailable."""
+        import requests
+
+        rows = [
+            {"Summary": "Risk A", "API Impact": "No"},
+            {"Summary": "", "API Impact": "No"},
+        ]
+        client = _abort_client()
+        client.get_createmeta_issue_types.side_effect = requests.exceptions.ConnectionError("x")
+        client.find_issue_keys_by_summaries.return_value = {}
+        client.create_issue.side_effect = ["CA-1"]
+
+        result = run_import(
+            rows,
+            org_config=_org_config(),
+            team_config=_team_config(),
+            jira_fields=[],
+            client=client,
+            report=_new_report(),
+            report_path=tmp_path / "r.json",
+        )
+
+        assert result.preflight is not None and result.preflight.status == "unavailable"
+        assert [key for _, _, key in result.created] == ["CA-1"]
+        assert [row for row, _, _ in result.failed] == [2]
