@@ -11,7 +11,15 @@ import requests
 from click.testing import CliRunner
 
 from jiramator.cli import cli
+from jiramator.config import load_org_config, load_team_config
+from jiramator.importer import _row_template_key
 from jiramator.jira_client import JiraApiError
+from jiramator.run_report import (
+    IssueResult,
+    RunReport,
+    compute_resolved_hash,
+    write_report_atomic,
+)
 
 
 @pytest.fixture
@@ -163,6 +171,9 @@ class TestImportCommand:
 
         assert result.exit_code == 0
         assert "PREVIEW REPORT" in result.output
+        assert "Preview based on field_aliases only (could not reach Jira)" in " ".join(
+            result.output.split()
+        )
 
     def test_unsupported_extension_exits_nonzero_with_clear_message(
         self,
@@ -569,6 +580,56 @@ def _sc1_createmeta() -> dict[str, dict]:
     }
 
 
+_SC1_REPOS = ["repo-alpha", "", "", "repo-delta", "repo-echo", "repo-foxtrot"]
+
+
+def _write_sc1_sheet(tmp_path: Path, summaries: list[str] | None = None) -> Path:
+    """Write the synthetic SC1 Risk sheet (optionally with custom summaries)."""
+    summaries = summaries or [f"Synthetic risk {i}" for i in range(1, 7)]
+    sheet_path = tmp_path / "risks.csv"
+    lines = ["Summary,Repositories,Fix Version"]
+    lines += [f"{summary},{repo}," for summary, repo in zip(summaries, _SC1_REPOS, strict=True)]
+    sheet_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return sheet_path
+
+
+def _preflight_client(createmeta: dict[str, dict] | None = None) -> MagicMock:
+    client = MagicMock()
+    client.get_fields.return_value = []
+    client.get_createmeta_issue_types.return_value = [{"id": "10100", "name": "Risk"}]
+    client.get_createmeta_fields.return_value = (
+        createmeta if createmeta is not None else _sc1_createmeta()
+    )
+    return client
+
+
+def _invoke_dry_run(
+    runner: CliRunner,
+    org_config_path: Path,
+    team_config_path: Path,
+    sheet_path: Path,
+    *extra: str,
+):
+    return runner.invoke(
+        cli,
+        [
+            "import",
+            "--org-config",
+            str(org_config_path),
+            "--team-config",
+            str(team_config_path),
+            "--dry-run",
+            *extra,
+            str(sheet_path),
+        ],
+    )
+
+
+def _flat(output: str) -> str:
+    """Collapse whitespace so Rich's 80-column wrapping can't split a phrase."""
+    return " ".join(output.split())
+
+
 class TestImportPreflightDryRun:
     def test_sc1_risk_sheet_reports_all_problems_exit_1(
         self,
@@ -674,3 +735,196 @@ class TestImportPreflightDryRun:
         assert "not preflight-validated" in output
         assert "required Reporter (reporter) depends on live user lookup" in output
         mock_client.find_user_account_id.assert_not_called()
+
+    def test_get_fields_failure_still_validates_and_exits_1(
+        self, runner, monkeypatch, org_config_path, team_config_path, tmp_path
+    ):
+        """PRE-04: get_fields fails but createmeta works → aliases-only warning
+        AND the validation section; problems still exit 1."""
+        client = _preflight_client()
+        client.get_fields.side_effect = JiraApiError("Server Error", status_code=500)
+        monkeypatch.setattr("jiramator.cli.JiraClient", MagicMock(return_value=client))
+
+        result = _invoke_dry_run(runner, org_config_path, team_config_path, _write_sc1_sheet(tmp_path))
+
+        output = _flat(result.output)
+        assert result.exit_code == 1, output
+        assert "Preview based on field_aliases only (could not reach Jira)" in output
+        assert "Schema validation found problems" in output
+        assert "6 of 6 rows have problems" in output
+
+    def test_createmeta_connection_error_is_skipped_exit_0(
+        self, runner, monkeypatch, org_config_path, team_config_path, tmp_path
+    ):
+        client = _preflight_client()
+        client.get_createmeta_issue_types.side_effect = requests.exceptions.ConnectionError("boom")
+        monkeypatch.setattr("jiramator.cli.JiraClient", MagicMock(return_value=client))
+
+        result = _invoke_dry_run(runner, org_config_path, team_config_path, _write_sc1_sheet(tmp_path))
+
+        output = _flat(result.output)
+        assert result.exit_code == 0, output
+        assert "Schema validation skipped: could not fetch Jira create metadata" in output
+        assert "✓" not in output
+        assert output.count("Schema validation skipped") == 1
+
+    def test_all_rows_pass_prints_passed_exit_0(
+        self, runner, monkeypatch, org_config_path, team_config_path, tmp_path
+    ):
+        createmeta = {k: v for k, v in _sc1_createmeta().items() if k != "fixVersions"}
+        createmeta["customfield_11941"] = {**createmeta["customfield_11941"], "required": False}
+        client = _preflight_client(createmeta)
+        monkeypatch.setattr("jiramator.cli.JiraClient", MagicMock(return_value=client))
+
+        result = _invoke_dry_run(runner, org_config_path, team_config_path, _write_sc1_sheet(tmp_path))
+
+        output = _flat(result.output)
+        assert result.exit_code == 0, output
+        assert "✓ Schema validation passed: 6 row(s) checked" in output
+        assert "rows have problems" not in output
+
+    def test_preview_rows_does_not_cap_failing_rows(
+        self, runner, monkeypatch, org_config_path, team_config_path, tmp_path
+    ):
+        """D-11: every failing row is printed regardless of --preview-rows."""
+        client = _preflight_client()
+        monkeypatch.setattr("jiramator.cli.JiraClient", MagicMock(return_value=client))
+
+        result = _invoke_dry_run(
+            runner, org_config_path, team_config_path, _write_sc1_sheet(tmp_path), "--preview-rows", "1"
+        )
+
+        assert result.exit_code == 1, result.output
+        for n in range(1, 7):
+            assert f"Row {n} 'Synthetic risk {n}' [Risk]:" in result.output
+
+    def test_max_rows_limits_validated_rows(
+        self, runner, monkeypatch, org_config_path, team_config_path, tmp_path
+    ):
+        client = _preflight_client()
+        monkeypatch.setattr("jiramator.cli.JiraClient", MagicMock(return_value=client))
+
+        result = _invoke_dry_run(
+            runner, org_config_path, team_config_path, _write_sc1_sheet(tmp_path), "--max-rows", "2"
+        )
+
+        output = result.output
+        assert result.exit_code == 1, output
+        assert "2 of 2 rows have problems" in output
+        assert "Row 1 'Synthetic risk 1'" in output
+        assert "Row 2 'Synthetic risk 2'" in output
+        assert "Row 3" not in output
+
+    def test_resume_dry_run_skips_rows_already_created(
+        self, runner, monkeypatch, org_config_path, team_config_path, tmp_path
+    ):
+        """OQ-2: dry-run --resume validates exactly the rows a live resume would."""
+        org_config, _ = load_org_config(org_config_path)
+        team_config, _ = load_team_config(team_config_path)
+        prior = RunReport(
+            command=["jiramator", "import"],
+            started_at="2026-01-01T00:00:00Z",
+            ended_at="2026-01-01T00:01:00Z",
+            team_config_path=str(team_config_path.resolve()),
+            org_config_path=str(org_config_path.resolve()),
+            team_name=team_config.team_name,
+            resolved_config_hash=compute_resolved_hash(org_config, team_config, None, []),
+            status="partial",
+            counts={"created": 1, "skipped": 0, "failed": 0},
+            issues=[
+                IssueResult(
+                    template_key=_row_template_key(1, "Synthetic risk 1"),
+                    kind="imported",
+                    status="created",
+                    jira_key="CA-1",
+                )
+            ],
+        )
+        prior_path = tmp_path / "prior.json"
+        write_report_atomic(prior, prior_path)
+
+        client = _preflight_client()
+        monkeypatch.setattr("jiramator.cli.JiraClient", MagicMock(return_value=client))
+
+        result = _invoke_dry_run(
+            runner,
+            org_config_path,
+            team_config_path,
+            _write_sc1_sheet(tmp_path),
+            "--resume",
+            str(prior_path),
+        )
+
+        output = result.output
+        assert result.exit_code == 1, output
+        assert "5 of 5 rows have problems" in output
+        validation = output.split("Schema validation found problems", 1)[1]
+        assert "Row 1 '" not in validation
+        assert "Row 2 'Synthetic risk 2'" in validation
+
+    def test_markup_in_summary_printed_literally(
+        self, runner, monkeypatch, org_config_path, team_config_path, tmp_path
+    ):
+        """T-02-08: Rich markup in cell text is printed literally, never parsed."""
+        summaries = [f"Synthetic risk {i}" for i in range(1, 7)]
+        summaries[0] = "Synthetic [bold]risk[/] 1"
+        summaries[1] = "Synthetic risk [/] 2"  # an orphan close tag would raise MarkupError
+        client = _preflight_client()
+        monkeypatch.setattr("jiramator.cli.JiraClient", MagicMock(return_value=client))
+
+        result = _invoke_dry_run(
+            runner, org_config_path, team_config_path, _write_sc1_sheet(tmp_path, summaries)
+        )
+
+        assert result.exception is None or isinstance(result.exception, SystemExit), result.exception
+        assert result.exit_code == 1, result.output
+        assert "Row 1 'Synthetic [bold]risk[/] 1' [Risk]:" in result.output
+        assert "Row 2 'Synthetic risk [/] 2' [Risk]:" in result.output
+        assert "6 of 6 rows have problems" in result.output
+
+    def test_non_ascii_summary_printed_verbatim(
+        self, runner, monkeypatch, org_config_path, team_config_path, tmp_path
+    ):
+        summaries = [f"Synthetic risk {i}" for i in range(1, 7)]
+        summaries[0] = "Risque — évalué £"
+        client = _preflight_client()
+        monkeypatch.setattr("jiramator.cli.JiraClient", MagicMock(return_value=client))
+
+        result = _invoke_dry_run(
+            runner, org_config_path, team_config_path, _write_sc1_sheet(tmp_path, summaries)
+        )
+
+        assert result.exit_code == 1, result.output
+        assert "Row 1 'Risque — évalué £' [Risk]:" in result.output
+
+    def test_zero_data_rows_exit_0_without_createmeta(
+        self, runner, monkeypatch, org_config_path, team_config_path, tmp_path
+    ):
+        sheet_path = tmp_path / "empty.csv"
+        sheet_path.write_text("Summary,Repositories,Fix Version\n")
+        client = _preflight_client()
+        monkeypatch.setattr("jiramator.cli.JiraClient", MagicMock(return_value=client))
+
+        result = _invoke_dry_run(runner, org_config_path, team_config_path, sheet_path)
+
+        assert result.exit_code == 0, result.output
+        client.get_createmeta_issue_types.assert_not_called()
+        client.get_createmeta_fields.assert_not_called()
+
+    def test_build_failed_row_listed_alongside_schema_problems(
+        self, runner, monkeypatch, org_config_path, team_config_path, tmp_path
+    ):
+        """D-08: a row that fails to build is part of the failing-rows report."""
+        sheet_path = _write_sc1_sheet(tmp_path)
+        with sheet_path.open("a", encoding="utf-8") as handle:
+            handle.write(",repo-golf,\n")
+        client = _preflight_client()
+        monkeypatch.setattr("jiramator.cli.JiraClient", MagicMock(return_value=client))
+
+        result = _invoke_dry_run(runner, org_config_path, team_config_path, sheet_path)
+
+        output = _flat(result.output)
+        assert result.exit_code == 1, output
+        assert "Row 7 '<missing summary>':" in output
+        assert "Row 7: required field 'summary' is missing or empty" in output
+        assert "7 of 7 rows have problems" in output
