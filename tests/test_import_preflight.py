@@ -450,3 +450,171 @@ class TestPreflightRender:
         text = _export(render_preflight_report(_problem_result("Synthetic A", None)))
 
         assert "Row 1 'Synthetic A':" in text
+
+
+# ---------------------------------------------------------------------------
+# Deferred required fields (D-06) and deferred off-screen columns (D-10)
+# ---------------------------------------------------------------------------
+
+
+def _deferred_org_config() -> OrgConfig:
+    """Synthetic org config mapping the import-deferred fields to columns."""
+    return OrgConfig(
+        jira_url="https://example.atlassian.net",
+        custom_fields={"sprint_field": "customfield_10021"},
+        bulk_create=BulkCreateConfig(
+            field_aliases={
+                "Summary": "summary",
+                "Issue Type": "issuetype",
+                "Reporter": "reporter",
+                "Assignee": "assignee",
+                "Parent": "parent",
+                "Sprint": "sprint_field",
+            },
+            field_types={"issuetype": "name_object"},
+            defaults={"issuetype": "Risk"},
+        ),
+        sprints={
+            "count": 6,
+            "standard_length_weeks": 2,
+            "long_length_weeks": 3,
+            "long_sprints": [6],
+        },
+    )
+
+
+def _deferred_createmeta(**required: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    meta: dict[str, dict[str, Any]] = {
+        "summary": {"name": "Summary", "required": True, "schema": {"type": "string"}},
+        "issuetype": {"name": "Issue Type", "required": True, "schema": {"type": "issuetype"}},
+        "project": {"name": "Project", "required": True, "schema": {"type": "project"}},
+    }
+    meta.update(required)
+    return meta
+
+
+_REQUIRED_REPORTER = {"name": "Reporter", "required": True, "schema": {"type": "user"}}
+_REQUIRED_PARENT = {"name": "Parent", "required": True, "schema": {"type": "issuelink"}}
+_REQUIRED_SPRINT = {"name": "Sprint", "required": True, "schema": {"type": "array"}}
+
+
+def _deferred_preflight(client: MagicMock, rows: list[dict[str, Any]]) -> PreflightResult:
+    return _preflight(
+        client,
+        rows,
+        _deferred_org_config(),
+        deferred_fields=frozenset({"reporter", "assignee", "parent"}),
+        deferred_logical_fields=frozenset({"sprint_field"}),
+    )
+
+
+class TestPreflightDeferred:
+    def test_required_reporter_with_value_is_caveat_not_problem(self):
+        client = _client(fields=_deferred_createmeta(reporter=_REQUIRED_REPORTER))
+        rows = [{"Summary": "Synthetic A", "Reporter": "Synthetic User"}]
+
+        result = _deferred_preflight(client, rows)
+
+        assert result.status == "passed"
+        assert result.problem_rows == []
+        assert result.rows[0].caveats == [
+            "required Reporter (reporter) depends on live user lookup — not preflight-validated"
+        ]
+        client.find_user_account_id.assert_not_called()
+        client.find_issue_keys_by_summaries.assert_not_called()
+        client.get_board_sprints.assert_not_called()
+
+    def test_whitespace_only_reporter_is_missing_required(self):
+        client = _client(fields=_deferred_createmeta(reporter=_REQUIRED_REPORTER))
+        rows = [{"Summary": "Synthetic A", "Reporter": "   "}]
+
+        result = _deferred_preflight(client, rows)
+
+        assert result.status == "problems"
+        assert result.rows[0].caveats == []
+        assert any(
+            "missing required field 'Reporter' (reporter)" in p for p in result.rows[0].problems
+        )
+
+    def test_subtask_parent_column_present_is_caveat_only(self):
+        client = _client(
+            issue_types=[{"id": "5", "name": "Sub-task"}],
+            fields=_deferred_createmeta(parent=_REQUIRED_PARENT),
+        )
+        rows = [{"Summary": "Synthetic A", "Issue Type": "Sub-task", "Parent": "CA-1"}]
+
+        result = _deferred_preflight(client, rows)
+
+        assert result.status == "passed"
+        assert result.rows[0].problems == []
+        assert result.rows[0].caveats == [
+            "required Parent (parent) depends on live parent lookup — not preflight-validated"
+        ]
+        client.find_issue_keys_by_summaries.assert_not_called()
+
+    def test_subtask_parent_column_absent_is_missing_required(self):
+        client = _client(
+            issue_types=[{"id": "5", "name": "Sub-task"}],
+            fields=_deferred_createmeta(parent=_REQUIRED_PARENT),
+        )
+        rows = [{"Summary": "Synthetic A", "Issue Type": "Sub-task"}]
+
+        result = _deferred_preflight(client, rows)
+
+        assert result.status == "problems"
+        assert any(
+            "missing required field 'Parent' (parent)" in p for p in result.rows[0].problems
+        )
+
+    def test_required_sprint_with_value_says_sprint_lookup(self):
+        client = _client(fields=_deferred_createmeta(customfield_10021=_REQUIRED_SPRINT))
+        rows = [{"Summary": "Synthetic A", "Sprint": "PI-1 Sprint 1"}]
+
+        result = _deferred_preflight(client, rows)
+
+        assert result.status == "passed"
+        assert result.rows[0].caveats == [
+            "required Sprint (customfield_10021) depends on live sprint lookup — "
+            "not preflight-validated"
+        ]
+
+    def test_reporter_column_not_on_create_screen_is_off_screen_problem(self):
+        client = _client(fields=_deferred_createmeta())
+        rows = [{"Summary": "Synthetic A", "Reporter": "Synthetic User"}]
+
+        result = _deferred_preflight(client, rows)
+
+        assert result.status == "problems"
+        assert result.rows[0].problems == [
+            "reporter is mapped from column 'Reporter' but is not on the create screen for Risk"
+        ]
+        assert result.rows[0].caveats == []
+
+    def test_caveat_only_rows_never_counted_as_problems(self):
+        client = _client(fields=_deferred_createmeta(reporter=_REQUIRED_REPORTER))
+        rows = [
+            {"Summary": "Synthetic A", "Reporter": "Synthetic User"},
+            {"Summary": "Synthetic B", "Reporter": ""},
+        ]
+
+        result = _deferred_preflight(client, rows)
+        text = _export(render_preflight_report(result))
+
+        assert result.status == "problems"
+        assert [row.row_number for row in result.problem_rows] == [2]
+        assert "1 of 2 rows have problems" in text
+        assert "Not preflight-validated:" in text
+        caveat_section = text.split("Not preflight-validated:", 1)[1]
+        assert "Row 1 'Synthetic A' [Risk]:" in caveat_section
+        assert "not preflight-validated" in caveat_section
+
+    def test_passed_render_lists_caveats_after_check_mark(self):
+        client = _client(fields=_deferred_createmeta(reporter=_REQUIRED_REPORTER))
+        rows = [{"Summary": "Synthetic [bold]A[/]", "Reporter": "Synthetic User"}]
+
+        text = _export(render_preflight_report(_deferred_preflight(client, rows)))
+
+        assert "✓ Schema validation passed" in text
+        assert "Not preflight-validated:" in text
+        assert "Row 1 'Synthetic [bold]A[/]' [Risk]:" in text
+        assert "rows have problems" not in text

@@ -630,3 +630,47 @@ class TestImportPreflightDryRun:
         mock_client.find_user_account_id.assert_not_called()
         mock_client.get_createmeta_issue_types.assert_called_once()
         mock_client.get_createmeta_fields.assert_called_once()
+
+    def test_required_reporter_prints_caveat_exit_0(
+        self,
+        runner: CliRunner,
+        monkeypatch: pytest.MonkeyPatch,
+        org_config_path: Path,
+        team_config_path: Path,
+        tmp_path: Path,
+    ):
+        """D-06: a required reporter satisfied by a non-blank Reporter cell is a
+        caveat, not a problem — dry-run passes and makes no user lookups."""
+        sheet_path = tmp_path / "risks.csv"
+        sheet_path.write_text("Summary,Reporter\nSynthetic risk 1,Synthetic Person\n")
+
+        mock_client = MagicMock()
+        mock_client.get_fields.return_value = []
+        mock_client.get_createmeta_issue_types.return_value = [{"id": "10100", "name": "Risk"}]
+        mock_client.get_createmeta_fields.return_value = {
+            "summary": {"name": "Summary", "required": True, "schema": {"type": "string"}},
+            "issuetype": {"name": "Issue Type", "required": True, "schema": {"type": "issuetype"}},
+            "project": {"name": "Project", "required": True, "schema": {"type": "project"}},
+            "reporter": {"name": "Reporter", "required": True, "schema": {"type": "user"}},
+        }
+        monkeypatch.setattr("jiramator.cli.JiraClient", MagicMock(return_value=mock_client))
+
+        result = runner.invoke(
+            cli,
+            [
+                "import",
+                "--org-config",
+                str(org_config_path),
+                "--team-config",
+                str(team_config_path),
+                "--dry-run",
+                str(sheet_path),
+            ],
+        )
+
+        output = " ".join(result.output.split())  # undo Rich's 80-column wrapping
+        assert result.exit_code == 0, output
+        assert "Schema validation passed" in output
+        assert "not preflight-validated" in output
+        assert "required Reporter (reporter) depends on live user lookup" in output
+        mock_client.find_user_account_id.assert_not_called()

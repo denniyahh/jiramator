@@ -119,6 +119,43 @@ def _row_headers_for_field(row_result: RowBuildResult, field_id: str) -> list[st
     ]
 
 
+def _lookup_kind(field_id: str, logical_name: str, deferred_logical_fields: frozenset[str]) -> str:
+    """Name the live lookup a deferred field needs at create time."""
+    if logical_name in deferred_logical_fields:
+        return "sprint"
+    if field_id == "parent":
+        return "parent"
+    return "user"
+
+
+def _deferred_present(
+    row_result: RowBuildResult,
+    source_row: dict[str, Any],
+    deferred_fields: frozenset[str],
+    deferred_logical_fields: frozenset[str],
+) -> dict[str, tuple[str, str]]:
+    """Return field id -> (header, lookup kind) for deferred fields with a non-blank cell.
+
+    Deferred fields (reporter/assignee/parent/sprint) are dropped from the
+    built payload and resolved by a live lookup at create time; preflight
+    only checks that the raw cell is non-blank (D-06). No lookup is made.
+    """
+    present: dict[str, tuple[str, str]] = {}
+    for header, resolved in row_result.resolved_columns.items():
+        field_id = resolved.jira_field
+        if field_id is None:
+            continue
+        if field_id not in deferred_fields and resolved.logical_name not in deferred_logical_fields:
+            continue
+        if not str(source_row.get(header, "") or "").strip():
+            continue
+        present.setdefault(
+            field_id,
+            (header, _lookup_kind(field_id, resolved.logical_name, deferred_logical_fields)),
+        )
+    return present
+
+
 def _row_problem_messages(
     problems: list[PayloadProblem],
     row_result: RowBuildResult,
@@ -258,21 +295,47 @@ def run_preflight(
                 schema_by_id[type_id] = client.get_createmeta_fields(project_key, type_id)
             field_metadata = schema_by_id[type_id]
 
+            source_row = (
+                source_rows[row_result.row_number - 1]
+                if 0 < row_result.row_number <= len(source_rows)
+                else {}
+            )
+            deferred = _deferred_present(
+                row_result, source_row, deferred_fields, deferred_logical_fields
+            )
             problems = find_payload_problems(
                 payload_fields,
                 field_metadata,
                 skip_allowed_value_field_ids=_IMPORT_SKIP_ALLOWED_VALUE_FIELD_IDS,
                 report_off_screen_fields=True,
+                assume_present_field_ids=frozenset(deferred),
                 blank_adf_counts_as_missing=True,
             )
+            messages = _row_problem_messages(
+                problems, row_result, issue_type_name, alias_headers
+            )
+            caveats: list[str] = []
+            for field_id, (header, kind) in deferred.items():
+                meta = field_metadata.get(field_id)
+                if meta is None:
+                    # D-10: the column maps to a field not on this create screen.
+                    messages.append(
+                        f"{field_id} is mapped from column '{header}' but is not on "
+                        f"the create screen for {issue_type_name}"
+                    )
+                elif meta.get("required"):
+                    name = meta.get("name", field_id)
+                    caveats.append(
+                        f"required {name} ({field_id}) depends on live {kind} "
+                        "lookup — not preflight-validated"
+                    )
             preflight_rows.append(
                 PreflightRow(
                     row_number=row_result.row_number,
                     summary=row_result.summary,
                     issue_type=issue_type_name,
-                    problems=_row_problem_messages(
-                        problems, row_result, issue_type_name, alias_headers
-                    ),
+                    problems=messages,
+                    caveats=caveats,
                 )
             )
     except (JiraApiError, requests.exceptions.RequestException) as exc:
@@ -323,21 +386,42 @@ def render_preflight_report(result: PreflightResult) -> str:
         reason = escape(result.reason or "not run")
         return f"[yellow]⚠ Schema validation skipped: {reason}[/]"
     if result.status == "passed":
-        return (
+        lines = [
             f"[green]✓ Schema validation passed: {result.checked_rows} row(s) "
             "checked against Jira createmeta[/]"
-        )
+        ]
+        lines.extend(_render_caveat_only_rows(result))
+        return "\n".join(lines)
 
     lines = ["[bold red]Schema validation found problems:[/]"]
     for row in result.problem_rows:
-        header = f"Row {row.row_number} '{escape(row.summary)}'"
-        if row.issue_type is not None:
-            bracketed = escape(f"[{row.issue_type}]")
-            header += f" {bracketed}"
-        lines.append(f"{header}:")
+        lines.append(_row_header(row))
         for problem in row.problems:
             lines.append(f"  [red]•[/] {escape(problem)}")
+        for caveat in row.caveats:
+            lines.append(f"  [yellow]⚠[/] {escape(caveat)}")
+    lines.extend(_render_caveat_only_rows(result))
     lines.append(
         f"{len(result.problem_rows)} of {result.considered_rows} rows have problems"
     )
     return "\n".join(lines)
+
+
+def _row_header(row: PreflightRow) -> str:
+    header = f"Row {row.row_number} '{escape(row.summary)}'"
+    if row.issue_type is not None:
+        header += f" {escape(f'[{row.issue_type}]')}"
+    return f"{header}:"
+
+
+def _render_caveat_only_rows(result: PreflightResult) -> list[str]:
+    """Render rows with caveats but no problems (D-06) — never counted as problems."""
+    caveat_rows = [row for row in result.rows if row.caveats and not row.problems]
+    if not caveat_rows:
+        return []
+    lines = ["[yellow]Not preflight-validated:[/]"]
+    for row in caveat_rows:
+        lines.append(_row_header(row))
+        for caveat in row.caveats:
+            lines.append(f"  [yellow]⚠[/] {escape(caveat)}")
+    return lines

@@ -156,7 +156,8 @@ def find_payload_problems(
         report_off_screen_fields: Report payload fields absent from
             ``field_metadata`` as ``off_screen`` problems (import only).
         assume_present_field_ids: Field ids treated as present for the
-            required-field check (reserved; not yet applied).
+            required-field check — e.g. import's deferred fields (reporter,
+            parent, …) that a live run fills in at create time.
         blank_adf_counts_as_missing: Treat a required field whose value is an
             ADF document with only whitespace text as missing.
 
@@ -174,6 +175,8 @@ def find_payload_problems(
             continue
         if meta.get("hasDefaultValue"):
             continue
+        if field_id in assume_present_field_ids:
+            continue  # Supplied at create time (e.g. a deferred lookup field).
         value = fields.get(field_id)
         missing = field_id not in fields or value in (None, "", [], {})
         if not missing and blank_adf_counts_as_missing and _adf_text_is_blank(value):
