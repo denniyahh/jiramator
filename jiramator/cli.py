@@ -15,10 +15,12 @@ from pathlib import Path
 import click
 import requests
 from rich.console import Console
+from rich.markup import escape
 
 from jiramator.config import OrgConfig, load_org_config, load_team_config
 from jiramator.config_merge import merge_configs
 from jiramator.error_format import ConfigValidationError
+from jiramator.import_preflight import render_preflight_report
 from jiramator.importer import (
     render_import_execution_report,
     render_preview_report,
@@ -630,33 +632,52 @@ def import_command(
     if dry_run:
         # Opportunistically fetch live field metadata so the preview reflects
         # auto-lookup columns (e.g. Assignee, Parent, Sprint, custom fields
-        # not in field_aliases) the same way a live run would resolve them.
-        # Degrades gracefully to an offline preview if credentials are
-        # missing or Jira is unreachable — dry-run never fails because of
-        # this, it just falls back to field_aliases-only resolution.
+        # not in field_aliases) the same way a live run would resolve them,
+        # and reuse the same client for read-only createmeta schema
+        # validation (preflight). Without credentials the preview degrades
+        # to field_aliases-only and schema validation is skipped (exit 0).
         jira_fields = None
+        client: JiraClient | None = None
         try:
-            jira_fields = JiraClient(org_config).get_fields()
+            client = JiraClient(org_config)
         except ValueError as exc:
+            reason = escape(str(exc))
             console.print(
                 f"[yellow]⚠ Preview based on field_aliases only (no Jira "
-                f"credentials available): {exc}[/]"
+                f"credentials available): {reason}[/]"
             )
-        except (JiraApiError, requests.exceptions.RequestException) as exc:
             console.print(
-                f"[yellow]⚠ Preview based on field_aliases only (could not "
-                f"reach Jira): {exc}[/]"
+                f"[yellow]⚠ Schema validation skipped: no Jira credentials "
+                f"available ({reason})[/]"
             )
+        if client is not None:
+            try:
+                jira_fields = client.get_fields()
+            except (JiraApiError, requests.exceptions.RequestException) as exc:
+                # Only the preview degrades; schema validation still runs.
+                console.print(
+                    f"[yellow]⚠ Preview based on field_aliases only (could not "
+                    f"reach Jira): {escape(str(exc))}[/]"
+                )
 
+        # The drift check above already ran; passing prior_report makes the
+        # dry-run validate exactly the rows a live resume would attempt.
         result = run_import(
             rows,
             org_config=org_config,
             team_config=team_config,
             jira_fields=jira_fields,
-            client=None,
+            client=client,
             dry_run=True,
+            prior_report=prior_report,
         )
         console.print(render_preview_report(result.preview, preview_rows=preview_rows))
+        preflight = getattr(result, "preflight", None)
+        if preflight is not None:
+            console.print(render_preflight_report(preflight))
+            if preflight.status == "problems":
+                # Deliberate breaking change (D-03): dry-run fails on problems.
+                sys.exit(1)
         return
 
     # Build a report for live runs (cli owns the lifecycle for import).

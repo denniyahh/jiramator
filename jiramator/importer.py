@@ -11,6 +11,7 @@ from typing import Any
 
 from jiramator.config import OrgConfig, TeamConfig
 from jiramator.field_resolver import ResolvedField, build_and_coerce_field_value, resolve_field_name
+from jiramator.import_preflight import PreflightResult, run_preflight
 from jiramator.jira_client import JiraApiError, JiraClient
 from jiramator.run_report import (
     IssueResult,
@@ -84,6 +85,7 @@ class ImportRunResult:
     created: list[tuple[int, str, str]]
     skipped: list[tuple[int, str, str]]
     failed: list[tuple[int, str, str]]
+    preflight: PreflightResult | None = None
 
 
 _DIRECT_FIELDS = {"summary"}
@@ -259,6 +261,17 @@ def _row_template_key(row_number: int, summary: str) -> str:
     return f"imported:row{row_number}:{digest}"
 
 
+def _prior_created_keys(prior_report: RunReport | None) -> dict[str, str]:
+    """Return template_key -> jira_key for rows a prior run already created."""
+    prior_created: dict[str, str] = {}
+    if prior_report is None:
+        return prior_created
+    for issue in prior_report.issues:
+        if issue.kind == "imported" and issue.status == "created" and issue.jira_key:
+            prior_created[issue.template_key] = issue.jira_key
+    return prior_created
+
+
 def run_import(
     rows: list[dict[str, Any]],
     *,
@@ -292,31 +305,42 @@ def run_import(
     )
 
     if dry_run:
-        return ImportRunResult(preview=preview, created=[], skipped=[], failed=[])
+        preflight: PreflightResult | None = None
+        if client is not None:
+            # Validate exactly the rows a live (resume) run would attempt.
+            preflight = run_preflight(
+                client,
+                project_key=team_config.project_key,
+                row_results=preview.row_results,
+                source_rows=rows,
+                org_config=org_config,
+                skip_template_keys=frozenset(_prior_created_keys(prior_report)),
+                template_key_fn=_row_template_key,
+                deferred_fields=frozenset(_DEFERRED_FIELDS),
+                deferred_logical_fields=frozenset(_DEFERRED_LOGICAL_FIELDS),
+            )
+        return ImportRunResult(
+            preview=preview, created=[], skipped=[], failed=[], preflight=preflight
+        )
 
     if client is None:
         raise ValueError("client is required for live imports")
 
     # ---- Resume skip-set + carry-forward of prior-created issues --------
-    prior_created: dict[str, str] = {}
-    if prior_report is not None:
+    prior_created = _prior_created_keys(prior_report)
+    if prior_report is not None and report is not None:
+        # Carry forward every prior-created entry, in prior-report order.
         for issue in prior_report.issues:
-            if (
-                issue.kind == "imported"
-                and issue.status == "created"
-                and issue.jira_key
-            ):
-                prior_created[issue.template_key] = issue.jira_key
-                if report is not None:
-                    report.issues.append(
-                        IssueResult(
-                            template_key=issue.template_key,
-                            kind="imported",
-                            status="created",
-                            jira_key=issue.jira_key,
-                        )
+            if issue.kind == "imported" and issue.status == "created" and issue.jira_key:
+                report.issues.append(
+                    IssueResult(
+                        template_key=issue.template_key,
+                        kind="imported",
+                        status="created",
+                        jira_key=issue.jira_key,
                     )
-                    report.counts["created"] = report.counts.get("created", 0) + 1
+                )
+                report.counts["created"] = report.counts.get("created", 0) + 1
 
     def _persist() -> None:
         if report is not None and report_path is not None:

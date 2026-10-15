@@ -120,6 +120,7 @@ class TestImportCommand:
 
         assert result.exit_code == 0
         assert "PREVIEW REPORT" in result.output
+        assert "Schema validation skipped" in result.output
 
     def test_dry_run_degrades_gracefully_when_jira_unreachable(
         self,
@@ -539,3 +540,93 @@ class TestUpdateCommand:
         assert "Duplicate Jira keys found" in result.output
         assert "CA-1 appears on rows 1, 2" in result.output
         jira_client_ctor.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Import preflight (dry-run)
+# ---------------------------------------------------------------------------
+
+
+def _sc1_createmeta() -> dict[str, dict]:
+    """Synthetic Risk createmeta mirroring the SC1 incident schema."""
+    return {
+        "summary": {"name": "Summary", "required": True, "hasDefaultValue": False, "schema": {"type": "string"}},
+        "issuetype": {"name": "Issue Type", "required": True, "hasDefaultValue": False, "schema": {"type": "issuetype"}},
+        "project": {"name": "Project", "required": True, "hasDefaultValue": False, "schema": {"type": "project"}},
+        "fixVersions": {
+            "name": "Fix versions",
+            "required": True,
+            "hasDefaultValue": False,
+            "schema": {"type": "array", "items": "version"},
+            "allowedValues": [{"id": "1", "name": "26.1.1"}],
+        },
+        "customfield_11941": {
+            "name": "Repositories",
+            "required": True,
+            "hasDefaultValue": False,
+            "schema": {"type": "string", "custom": "com.atlassian.jira.plugin.system.customfieldtypes:textarea"},
+        },
+    }
+
+
+class TestImportPreflightDryRun:
+    def test_sc1_risk_sheet_reports_all_problems_exit_1(
+        self,
+        runner: CliRunner,
+        monkeypatch: pytest.MonkeyPatch,
+        org_config_path: Path,
+        team_config_path: Path,
+        tmp_path: Path,
+    ):
+        """SC1 replay: 6 rows, Fix Version empty everywhere, Repositories empty
+        on rows 2-3 → all 8 problems listed in one run, exit 1, no writes."""
+        sheet_path = tmp_path / "risks.csv"
+        repos = ["repo-alpha", "", "", "repo-delta", "repo-echo", "repo-foxtrot"]
+        lines = ["Summary,Repositories,Fix Version"]
+        lines += [f"Synthetic risk {i},{repo}," for i, repo in enumerate(repos, start=1)]
+        sheet_path.write_text("\n".join(lines) + "\n")
+
+        mock_client = MagicMock()
+        mock_client.get_fields.return_value = []
+        mock_client.get_createmeta_issue_types.return_value = [{"id": "10100", "name": "Risk"}]
+        mock_client.get_createmeta_fields.return_value = _sc1_createmeta()
+        monkeypatch.setattr("jiramator.cli.JiraClient", MagicMock(return_value=mock_client))
+
+        result = runner.invoke(
+            cli,
+            [
+                "import",
+                "--org-config",
+                str(org_config_path),
+                "--team-config",
+                str(team_config_path),
+                "--dry-run",
+                str(sheet_path),
+            ],
+        )
+
+        output = result.output
+        assert result.exit_code == 1, output
+        assert "6 of 6 rows have problems" in output
+        assert "[Risk]" in output
+        assert output.count("missing required field 'Fix versions' (fixVersions)") == 6
+        assert output.count("(customfield_11941)") == 2
+        assert output.count("missing required field") == 8
+
+        # Rows 2 and 3 (and only they) carry the Repositories problem.
+        blocks: dict[int, str] = {}
+        for n in range(1, 7):
+            start = output.index(f"Row {n} 'Synthetic risk {n}'")
+            end = output.find("Row ", start + 1)
+            blocks[n] = output[start:end if end != -1 else len(output)]
+        for n in (2, 3):
+            assert "(customfield_11941)" in blocks[n]
+        for n in (1, 4, 5, 6):
+            assert "(customfield_11941)" not in blocks[n]
+
+        mock_client.create_issue.assert_not_called()
+        mock_client.create_issues_bulk.assert_not_called()
+        mock_client.find_issue_keys_by_summaries.assert_not_called()
+        mock_client.find_user_account_id.assert_not_called()
+        mock_client.get_createmeta_issue_types.assert_called_once()
+        mock_client.get_createmeta_fields.assert_called_once()

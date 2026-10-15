@@ -1,0 +1,314 @@
+"""Import preflight: validate every built row against Jira's live createmeta schema.
+
+``run_preflight`` checks each successfully built import row's payload against
+the create-screen schema for ``team_config.project_key`` and the row's own
+issue type, collecting every problem across every row in one pass.
+``render_preflight_report`` turns the result into Rich-markup text.
+
+This module only performs read-only createmeta fetches — it never creates,
+edits, or looks up issues, users or sprints.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Literal
+
+import requests
+from rich.markup import escape
+
+from jiramator.config import OrgConfig
+from jiramator.field_resolver import resolve_field_name
+from jiramator.jira_client import JiraApiError
+from jiramator.payload_validator import PayloadProblem, find_payload_problems
+
+if TYPE_CHECKING:
+    from jiramator.importer import RowBuildResult
+    from jiramator.jira_client import JiraClient
+
+# The row's issue type is validated by a casefold match against the project's
+# createmeta issue-type list (D-02), so the validator's case-sensitive
+# allowedValues check must not re-check it (OQ-1). fixVersions IS validated.
+_IMPORT_SKIP_ALLOWED_VALUE_FIELD_IDS = frozenset({"issuetype"})
+
+_NO_ISSUE_TYPE_PROBLEM = (
+    "no issue type (no Issue Type column value and no bulk_create.defaults.issuetype)"
+)
+
+
+# ---------------------------------------------------------------------------
+# Result types
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class PreflightRow:
+    """Preflight outcome for one spreadsheet row."""
+
+    row_number: int
+    summary: str
+    issue_type: str | None
+    problems: list[str] = field(default_factory=list)
+    caveats: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class PreflightResult:
+    """Aggregate preflight outcome for an import run.
+
+    Attributes:
+        status: ``passed`` (every checked row is clean), ``problems`` (at
+            least one row has problems), ``unavailable`` (createmeta could
+            not be fetched — never presented as passed), or ``skipped``.
+        reason: Why validation was unavailable/skipped, else ``None``.
+        rows: Per-row outcomes in ascending row number.
+        checked_rows: Rows validated against createmeta.
+        considered_rows: Rows in scope (not resume-skipped), built or not.
+    """
+
+    status: Literal["passed", "problems", "unavailable", "skipped"]
+    reason: str | None
+    rows: list[PreflightRow]
+    checked_rows: int
+    considered_rows: int
+
+    @property
+    def problem_rows(self) -> list[PreflightRow]:
+        """Rows with at least one problem."""
+        return [row for row in self.rows if row.problems]
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _alias_headers_by_field_id(org_config: OrgConfig) -> dict[str, list[str]]:
+    """Map Jira field id -> field_aliases keys resolving to it, in config order."""
+    mapping: dict[str, list[str]] = {}
+    for alias in org_config.bulk_create.field_aliases:
+        resolved = resolve_field_name(alias, org_config)
+        if resolved.jira_field is None:
+            continue
+        headers = mapping.setdefault(resolved.jira_field, [])
+        if alias not in headers:
+            headers.append(alias)
+    return mapping
+
+
+def _quote_join(headers: list[str]) -> str:
+    return ", ".join(f"'{header}'" for header in headers)
+
+
+def _missing_required_message(
+    problem: PayloadProblem, alias_headers: dict[str, list[str]]
+) -> str:
+    headers = alias_headers.get(problem.field_id)
+    if headers:
+        return f"{problem.message} — no value in column(s) {_quote_join(headers)}"
+    return f"{problem.message} — no spreadsheet column mapped to this field"
+
+
+def _row_problem_messages(
+    problems: list[PayloadProblem],
+    alias_headers: dict[str, list[str]],
+) -> list[str]:
+    messages: list[str] = []
+    for problem in problems:
+        if problem.kind == "missing_required":
+            messages.append(_missing_required_message(problem, alias_headers))
+        else:
+            messages.append(problem.message)
+    return messages
+
+
+# ---------------------------------------------------------------------------
+# Preflight
+# ---------------------------------------------------------------------------
+
+
+def run_preflight(
+    client: JiraClient,
+    *,
+    project_key: str,
+    row_results: list[RowBuildResult],
+    source_rows: list[dict[str, Any]],
+    org_config: OrgConfig,
+    skip_template_keys: frozenset[str] = frozenset(),
+    template_key_fn: Callable[[int, str], str] | None = None,
+    deferred_fields: frozenset[str] = frozenset(),
+    deferred_logical_fields: frozenset[str] = frozenset(),
+) -> PreflightResult:
+    """Validate every built import row against Jira's live createmeta schema.
+
+    Fetches the project's creatable issue types once and each distinct issue
+    type's field schema once. Rows whose template key is in
+    ``skip_template_keys`` (already created by a prior run) are neither
+    validated nor counted. If no row needs checking, no client call is made.
+
+    Args:
+        client: Jira client used only for read-only createmeta fetches.
+        project_key: Project whose create screens are checked.
+        row_results: Per-row build results from ``build_preview_report``.
+        source_rows: Raw spreadsheet rows (same order as ``row_results``).
+        org_config: Org config, used to attribute fields to column headers.
+        skip_template_keys: Template keys of rows a resume would skip.
+        template_key_fn: Computes a row's template key from (row_number,
+            summary); required for ``skip_template_keys`` to apply.
+        deferred_fields: Jira field ids resolved at create time.
+        deferred_logical_fields: Logical field names resolved at create time.
+
+    Returns:
+        A ``PreflightResult``. Status is ``unavailable`` (with no rows) if
+        any createmeta fetch fails.
+    """
+    in_scope: list[RowBuildResult] = []
+    for row_result in row_results:
+        if template_key_fn is not None and skip_template_keys:
+            key = template_key_fn(row_result.row_number, row_result.summary)
+            if key in skip_template_keys:
+                continue
+        in_scope.append(row_result)
+
+    rows_to_check = [r for r in in_scope if r.success and r.payload]
+    considered_rows = len(in_scope)
+
+    if not rows_to_check:
+        return PreflightResult(
+            status="passed",
+            reason=None,
+            rows=[],
+            checked_rows=0,
+            considered_rows=considered_rows,
+        )
+
+    alias_headers = _alias_headers_by_field_id(org_config)
+    schema_by_id: dict[str, dict[str, dict[str, Any]]] = {}
+    preflight_rows: list[PreflightRow] = []
+
+    try:
+        issue_types = client.get_createmeta_issue_types(project_key)
+        by_casefold = {
+            str(item.get("name", "")).casefold(): item for item in issue_types
+        }
+        available = ", ".join(sorted(str(item.get("name", "")) for item in issue_types))
+
+        for row_result in sorted(rows_to_check, key=lambda r: r.row_number):
+            payload_fields: dict[str, Any] = (row_result.payload or {}).get("fields", {})
+            issue_type_value = payload_fields.get("issuetype") or {}
+            issue_type_name = (
+                issue_type_value.get("name") if isinstance(issue_type_value, dict) else None
+            )
+            if not issue_type_name:
+                preflight_rows.append(
+                    PreflightRow(
+                        row_number=row_result.row_number,
+                        summary=row_result.summary,
+                        issue_type=None,
+                        problems=[_NO_ISSUE_TYPE_PROBLEM],
+                    )
+                )
+                continue
+
+            issue_type_name = str(issue_type_name)
+            match = by_casefold.get(issue_type_name.casefold())
+            if match is None:
+                preflight_rows.append(
+                    PreflightRow(
+                        row_number=row_result.row_number,
+                        summary=row_result.summary,
+                        issue_type=issue_type_name,
+                        problems=[
+                            f"Issue type '{issue_type_name}' is not available for "
+                            f"creation in project {project_key} "
+                            f"(available: {available or 'none'})"
+                        ],
+                    )
+                )
+                continue
+
+            type_id = str(match.get("id"))
+            if type_id not in schema_by_id:
+                schema_by_id[type_id] = client.get_createmeta_fields(project_key, type_id)
+            field_metadata = schema_by_id[type_id]
+
+            problems = find_payload_problems(
+                payload_fields,
+                field_metadata,
+                skip_allowed_value_field_ids=_IMPORT_SKIP_ALLOWED_VALUE_FIELD_IDS,
+            )
+            preflight_rows.append(
+                PreflightRow(
+                    row_number=row_result.row_number,
+                    summary=row_result.summary,
+                    issue_type=issue_type_name,
+                    problems=_row_problem_messages(problems, alias_headers),
+                )
+            )
+    except (JiraApiError, requests.exceptions.RequestException) as exc:
+        return PreflightResult(
+            status="unavailable",
+            reason=str(exc),
+            rows=[],
+            checked_rows=0,
+            considered_rows=considered_rows,
+        )
+
+    has_problems = any(row.problems for row in preflight_rows)
+    return PreflightResult(
+        status="problems" if has_problems else "passed",
+        reason=None,
+        rows=preflight_rows,
+        checked_rows=len(rows_to_check),
+        considered_rows=considered_rows,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Rendering
+# ---------------------------------------------------------------------------
+
+
+def render_preflight_report(result: PreflightResult) -> str:
+    """Render a preflight result as Rich-markup text.
+
+    Every summary, issue type, message and reason is escaped; the issue type
+    is escaped as the whole ``[...]`` segment so lower-case names such as
+    ``risk`` are never swallowed as Rich style tags. Every failing row is
+    listed (no preview cap).
+
+    Args:
+        result: The preflight result to render.
+
+    Returns:
+        Rich-markup text suitable for ``Console.print``.
+    """
+    if result.status == "unavailable":
+        reason = escape(result.reason or "unknown error")
+        return (
+            "[yellow]⚠ Schema validation skipped: could not fetch Jira create "
+            f"metadata ({reason})[/]"
+        )
+    if result.status == "skipped":
+        reason = escape(result.reason or "not run")
+        return f"[yellow]⚠ Schema validation skipped: {reason}[/]"
+    if result.status == "passed":
+        return (
+            f"[green]✓ Schema validation passed: {result.checked_rows} row(s) "
+            "checked against Jira createmeta[/]"
+        )
+
+    lines = ["[bold red]Schema validation found problems:[/]"]
+    for row in result.problem_rows:
+        header = f"Row {row.row_number} '{escape(row.summary)}'"
+        if row.issue_type is not None:
+            bracketed = escape(f"[{row.issue_type}]")
+            header += f" {bracketed}"
+        lines.append(f"{header}:")
+        for problem in row.problems:
+            lines.append(f"  [red]•[/] {escape(problem)}")
+    lines.append(
+        f"{len(result.problem_rows)} of {result.considered_rows} rows have problems"
+    )
+    return "\n".join(lines)
