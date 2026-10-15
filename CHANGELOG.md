@@ -5,7 +5,35 @@ All notable changes to Jiramator are documented here. This project adheres to
 
 ## [Unreleased]
 
+### Changed
+- **Breaking: `import --dry-run` exits 1 on problems, and a live `import`
+  aborts before creating anything.** (a) `import --dry-run` now exits 1 when
+  preflight validation finds a problem in any row (it still exits 0 when
+  validation passes or is skipped because Jira is unavailable). Scripts that
+  treated a dry-run's exit code as "the preview printed" need updating.
+  (b) A live `import` now validates every row it would attempt first; if any
+  row has problems it creates nothing (no more row-by-row partial create),
+  prints every failing row and "Aborting — fix the rows above. No issues
+  were created.", and exits 1. The run report has status `failed` (never
+  `partial`), error type `Aborted` ("Preflight found problems in N of M
+  row(s). No issues were created."), and one `failed` entry per problem row.
+  `--resume` on that report revalidates and attempts every row. If Jira's
+  create metadata can't be fetched, a live run warns loudly that problems
+  may surface as Jira 400 errors and proceeds as before.
+
 ### Added
+- **Import preflight validation (PRE-01..PRE-04).** `import` checks every row
+  against Jira's live createmeta for its issue type before anything is
+  created, and lists every problem in one pass: missing required fields
+  (naming the column that would supply them), rejected option values
+  including fix versions that don't exist (`import` never creates
+  versions), plain text where ADF is required, columns mapped to fields that
+  aren't on the create screen, and rows that couldn't be built. Required
+  Reporter/Assignee/Parent/Sprint values depend on a live lookup and are
+  shown as "not preflight-validated" caveats instead of problems. A value
+  that can't be coerced (e.g. text in a number column) is now that row's
+  error instead of aborting the whole preview. `import --dry-run --resume`
+  validates exactly the rows a live resume would attempt.
 - **Ruff linting.** `ruff` is now a dev dependency, configured in `pyproject.toml`
   (`E`, `F`, `W`, `I`, `UP`, `B`), and enforced by a new `lint` job in CI. Existing
   findings were fixed: import order, unused imports, `datetime.UTC`, explicit

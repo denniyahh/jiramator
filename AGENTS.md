@@ -54,7 +54,9 @@ Five-layer design with strict separation of concerns:
 `import`/`update` follow a parallel path through `importer.py` / `updater.py`, using
 `field_resolver.py` (maps spreadsheet headers → Jira field IDs via org config aliases) and
 `value_coercion.py` (type coercion + `value_aliases` shorthand-to-Jira-label mapping) instead
-of `ticket_builder.py`.
+of `ticket_builder.py`. `import` additionally runs `import_preflight.py` (createmeta schema
+validation of every row a run would attempt) before any create: dry-run exits 1 on problems,
+and a live run aborts with nothing created (report status `failed`, error type `Aborted`).
 
 **Deferred fields (`import` only):** `reporter`, `assignee`, and `parent` can't be coerced from
 a raw spreadsheet string the way other fields are — Jira requires a live lookup (user search
@@ -102,9 +104,11 @@ support resume.
 by default; overridable per-org config via `jira_email_env`/`jira_token_env`). `plan --dry-run`
 opportunistically builds a client to validate every built ticket's fields against Jira's live
 createmeta schema (see `payload_validator.py` and `planner._preflight_validate()`). `import --dry-run`
-opportunistically fetches `client.get_fields()` so the preview correctly resolves columns that
-only match by Jira's live field name (`auto_lookup_unknown_fields`), not just `field_aliases`.
-Both degrade gracefully to an offline/unvalidated preview if credentials are missing or Jira is
+opportunistically builds one client and reuses it for `client.get_fields()` (so the preview
+correctly resolves columns that only match by Jira's live field name, `auto_lookup_unknown_fields`,
+not just `field_aliases`) and for createmeta row validation (`import_preflight.py`); each degrades
+separately — a `get_fields()` failure still validates, a createmeta failure prints "Schema
+validation skipped" and exits 0. Both degrade gracefully to an offline/unvalidated preview if credentials are missing or Jira is
 unreachable, but neither fails because of it. `update --dry-run` *requires* credentials outright
 (it fetches live field metadata for coercion preview and fails without them).
 

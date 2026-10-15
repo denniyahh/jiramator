@@ -163,9 +163,11 @@ values up front). `import` fetches live field metadata so the preview
 correctly resolves columns that only match by Jira's actual field name
 (rather than an explicit `field_aliases` entry) — without it, those columns
 would show as unresolved in the preview even though a live run resolves them
-fine. If credentials are missing or Jira is unreachable, both degrade
+fine. With credentials, `import --dry-run` also validates every row against
+Jira's create screen (createmeta) and **exits 1 when it finds problems**.
+If credentials are missing or Jira is unreachable, both degrade
 gracefully — they warn and still complete an offline preview rather than
-failing. `update --dry-run` is the one exception: it *requires* credentials
+failing; `import --dry-run` prints "Schema validation skipped" and exits 0. `update --dry-run` is the one exception: it *requires* credentials
 outright, since it fetches field metadata to preview value coercion and has
 no offline fallback.
 
@@ -325,9 +327,44 @@ A ready-to-edit example spreadsheet is included at
 Copy it, replace the sample rows with your own, and point `import` at your copy:
 
 ```bash
-jiramator import --dry-run ~/my-tickets.xlsx   # preview — creates nothing
-jiramator import ~/my-tickets.xlsx             # live — creates issues row by row
+jiramator import --dry-run ~/my-tickets.xlsx   # preview + validation — creates nothing
+jiramator import ~/my-tickets.xlsx             # live — validates, then creates issues row by row
 ```
+
+**Preflight validation.** Before anything is created, `import` checks every
+row against Jira's live create screen for its issue type and lists every
+problem in one pass:
+
+- required fields with no value (the message names the column(s) that would
+  supply it);
+- values Jira won't accept for a dropdown/option field, including fix
+  versions that don't exist — `import` never creates versions, so create
+  them in Jira first;
+- plain text where Jira requires rich text (ADF);
+- columns that map to a field that isn't on the create screen for that
+  issue type;
+- rows that couldn't be built at all (e.g. an empty Summary or a
+  non-numeric value in a number column).
+
+`import --dry-run` prints the validation section after the preview and exits
+1 if any row has problems. A live `import` runs the same check first and,
+if any row has problems, **aborts before creating anything** — no partial
+create. It lists every failing row, ends with "Aborting — fix the rows
+above. No issues were created.", exits 1, and writes a run report with
+status `failed`. Fix the rows and re-run (or `--resume` that report — nothing
+was created, so every row is validated and attempted again).
+`import --dry-run --resume <report>` validates exactly the rows a live
+resume would attempt (rows the prior run already created are skipped).
+
+Required Reporter/Assignee/Parent/Sprint values are resolved by a live
+lookup at create time, so preflight only checks the cell isn't blank and
+marks them "not preflight-validated". These caveats are printed in dry-run
+and live-abort output, but not on a live run that passes.
+
+If Jira's create metadata can't be fetched (no credentials, network error,
+no permission), the dry-run prints "Schema validation skipped" and exits 0;
+a live run prints a loud warning that row problems may surface as Jira 400
+errors and proceeds row by row as before.
 
 Column headers in the spreadsheet are mapped to Jira fields via your org
 config's `bulk_create.field_aliases` — the sample file's headers (`Summary`,
@@ -465,9 +502,9 @@ Common first-run problems and how to fix them:
 | `python3: command not found` (or `py` on Windows) | Python isn't installed or isn't on your PATH. Install Python 3.11+ from [python.org/downloads](https://www.python.org/downloads/) and reopen your terminal. |
 | **401 Unauthorized** / authentication errors | Your Jira email or API token is wrong, expired, or not set. Re-create a token at [id.atlassian.com/manage-profile/security/api-tokens](https://id.atlassian.com/manage-profile/security/api-tokens) and set `JIRA_EMAIL` / `JIRA_TOKEN` again. Note: `export`/`$env:` values only last for the **current terminal session**. |
 | **403 Forbidden** on create/update | Your account is authenticated but lacks permission to create or edit issues in that project. Ask your Jira admin for project access. |
-| **400 Bad Request** mentioning a field | A field value or custom field ID in your team config doesn't match your Jira instance. Re-run `jiramator init` to auto-discover field IDs, or check the value is one Jira accepts (e.g. a valid priority or issue type). |
+| **400 Bad Request** mentioning a field | A field value or custom field ID in your team config doesn't match your Jira instance. Re-run `jiramator init` to auto-discover field IDs, or check the value is one Jira accepts (e.g. a valid priority or issue type). For `import`, run `jiramator import --dry-run` first — its preflight validation lists every row's field problems up front (a live `import` aborts on them before creating anything). |
 | `jiramator --version` shows an old version | Your installed copy is stale. Upgrade with `pipx upgrade jiramator` (pipx) or re-run `pip install -e .` inside your activated virtual environment. The setup wizard (`init`) requires v1.1.0 or newer. |
-| Not sure what a command will do | Add `--dry-run` (on `plan`/`import`) — it previews everything and creates nothing. |
+| Not sure what a command will do | Add `--dry-run` (on `plan`/`import`) — it previews everything and creates nothing. `import --dry-run` exits 1 when preflight validation finds problems in any row. |
 | `SSLError` / `CERTIFICATE_VERIFY_FAILED` / "self-signed certificate in certificate chain" | Your company's network security tooling (VPN client, Netskope, Zscaler, etc.) is inspecting HTTPS traffic and presenting its own certificate. See [SSL certificate errors on a corporate network](#ssl-certificate-errors-on-a-corporate-network) below. |
 
 ### SSL certificate errors on a corporate network
