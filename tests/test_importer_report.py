@@ -12,7 +12,9 @@ import pytest
 from jiramator.config import BulkCreateConfig, OrgConfig, TeamConfig
 from jiramator.importer import _row_template_key, run_import
 from jiramator.jira_client import JiraApiError
+from jiramator.payload_validator import validate_ticket_payload
 from jiramator.run_report import IssueResult, RunReport
+from tests.conftest import PermissiveFieldMeta, stub_createmeta
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -57,6 +59,56 @@ def _new_report(*, hash_str: str = "h0") -> RunReport:
 
 
 # ---------------------------------------------------------------------------
+# Createmeta stub contract (tests/conftest.py)
+# ---------------------------------------------------------------------------
+
+
+class TestStubCreatemeta:
+    def test_get_unknown_field_is_permissive(self):
+        meta = PermissiveFieldMeta({}).get("customfield_99999")
+        assert isinstance(meta, dict)
+        assert meta["required"] is False
+        assert "schema" not in meta
+        assert "allowedValues" not in meta
+
+    def test_contains_any_key(self):
+        assert "anything" in PermissiveFieldMeta({})
+
+    def test_getitem_missing_does_not_raise(self):
+        assert PermissiveFieldMeta({})["x"]["required"] is False
+
+    def test_items_only_explicit(self):
+        meta = PermissiveFieldMeta({"a": {"name": "A", "required": True}})
+        assert list(meta.items()) == [("a", {"name": "A", "required": True})]
+        assert meta.get("a") == {"name": "A", "required": True}
+
+    def test_validator_reports_nothing(self):
+        payload = {
+            "summary": "Risk A",
+            "issuetype": {"name": "Risk"},
+            "customfield_11941": "plain text",
+        }
+        assert validate_ticket_payload(payload, PermissiveFieldMeta({})) == []
+        assert (
+            validate_ticket_payload(
+                payload, PermissiveFieldMeta({}), report_off_screen_fields=True
+            )
+            == []
+        )
+
+    def test_stub_createmeta_wires_client(self):
+        client = stub_createmeta(
+            MagicMock(),
+            issue_types=("Risk", "Task"),
+            fields_by_type={"Task": {"summary": {"name": "Summary", "required": True}}},
+        )
+        types = client.get_createmeta_issue_types("CA")
+        assert [t["name"] for t in types] == ["Risk", "Task"]
+        assert dict(client.get_createmeta_fields("CA", types[0]["id"])) == {}
+        assert list(client.get_createmeta_fields("CA", types[1]["id"])) == ["summary"]
+
+
+# ---------------------------------------------------------------------------
 # Template-key helper
 # ---------------------------------------------------------------------------
 
@@ -90,6 +142,7 @@ class TestSuccessfulImport:
             {"Summary": "Risk B", "API Impact": "No"},
         ]
         client = MagicMock()
+        stub_createmeta(client)
         client.find_issue_keys_by_summaries.return_value = {}
         client.create_issue.side_effect = ["CA-1", "CA-2"]
 
@@ -132,6 +185,7 @@ class TestDuplicateSkip:
     def test_i2_dedup_records_skipped(self, tmp_path):
         rows = [{"Summary": "Risk A", "API Impact": "No"}]
         client = MagicMock()
+        stub_createmeta(client)
         client.find_issue_keys_by_summaries.return_value = {"Risk A": "CA-9999"}
 
         report = _new_report()
@@ -181,6 +235,8 @@ class TestIncrementalPersist:
             return f"CA-{len(snapshots)}"
 
         client = MagicMock()
+
+        stub_createmeta(client)
         client.find_issue_keys_by_summaries.return_value = {}
         client.create_issue.side_effect = create_with_snapshot
 
@@ -223,6 +279,8 @@ class TestResume:
         )
 
         client = MagicMock()
+
+        stub_createmeta(client)
         client.find_issue_keys_by_summaries.return_value = {}
         client.create_issue.side_effect = ["CA-NEW"]
 
@@ -266,6 +324,8 @@ class TestResume:
         )
 
         client = MagicMock()
+
+        stub_createmeta(client)
         client.find_issue_keys_by_summaries.return_value = {}
         client.create_issue.side_effect = ["CA-RETRIED"]
 
@@ -308,6 +368,8 @@ class TestResume:
         )
 
         client = MagicMock()
+
+        stub_createmeta(client)
         client.find_issue_keys_by_summaries.return_value = {}
         client.create_issue.side_effect = [JiraApiError("boom", status_code=500)]
 
@@ -346,6 +408,8 @@ class TestResume:
         monkeypatch.setenv(org.jira_token_env, secret)
 
         client = MagicMock()
+
+        stub_createmeta(client)
         client.find_issue_keys_by_summaries.return_value = {}
         client.create_issue.side_effect = [
             JiraApiError(f"401 Authorization: Basic xyz token {secret}", status_code=401)
@@ -389,6 +453,8 @@ class TestPersistOnInterrupt:
             raise KeyboardInterrupt("simulated Ctrl-C")
 
         client = MagicMock()
+
+        stub_createmeta(client)
         client.find_issue_keys_by_summaries.return_value = {}
         client.create_issue.side_effect = create_with_interrupt
 
@@ -427,6 +493,8 @@ class TestPersistOnInterrupt:
             real_write(report, path)
 
         client = MagicMock()
+
+        stub_createmeta(client)
         client.find_issue_keys_by_summaries.return_value = {}
         client.create_issue.side_effect = KeyboardInterrupt("simulated Ctrl-C")
 
@@ -452,6 +520,7 @@ class TestBackwardCompat:
     def test_no_report_kwargs_still_works(self):
         rows = [{"Summary": "X", "API Impact": "No"}]
         client = MagicMock()
+        stub_createmeta(client)
         client.find_issue_keys_by_summaries.return_value = {}
         client.create_issue.return_value = "CA-1"
 
