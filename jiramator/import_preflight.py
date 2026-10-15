@@ -208,6 +208,8 @@ def run_preflight(
     type's field schema once. Rows whose template key is in
     ``skip_template_keys`` (already created by a prior run) are neither
     validated nor counted. If no row needs checking, no client call is made.
+    Rows that failed to build are listed with their build error (not
+    schema-checked) unless validation is unavailable.
 
     Args:
         client: Jira client used only for read-only createmeta fetches.
@@ -235,12 +237,24 @@ def run_preflight(
 
     rows_to_check = [r for r in in_scope if r.success and r.payload]
     considered_rows = len(in_scope)
+    # D-08: rows that failed to build are reported with their build error
+    # (not schema-checked) whenever validation itself runs.
+    build_failed_rows = [
+        PreflightRow(
+            row_number=r.row_number,
+            summary=r.summary,
+            issue_type=None,
+            problems=[r.error or "Unknown row error"],
+        )
+        for r in in_scope
+        if not (r.success and r.payload)
+    ]
 
     if not rows_to_check:
         return PreflightResult(
-            status="passed",
+            status="problems" if build_failed_rows else "passed",
             reason=None,
-            rows=[],
+            rows=sorted(build_failed_rows, key=lambda row: row.row_number),
             checked_rows=0,
             considered_rows=considered_rows,
         )
@@ -347,11 +361,12 @@ def run_preflight(
             considered_rows=considered_rows,
         )
 
-    has_problems = any(row.problems for row in preflight_rows)
+    all_rows = sorted(preflight_rows + build_failed_rows, key=lambda row: row.row_number)
+    has_problems = any(row.problems for row in all_rows)
     return PreflightResult(
         status="problems" if has_problems else "passed",
         reason=None,
-        rows=preflight_rows,
+        rows=all_rows,
         checked_rows=len(rows_to_check),
         considered_rows=considered_rows,
     )

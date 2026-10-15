@@ -141,17 +141,27 @@ def build_row_payload(
     }
     warnings: list[str] = []
     resolved_columns: dict[str, ResolvedField] = {}
+    conversion_errors: list[str] = []
 
     for source_header, raw_value in row.items():
         if raw_value is None or raw_value == "":
             continue
 
-        resolved, coerced = _build_resolved_value(
-            source_header,
-            raw_value,
-            org_config,
-            jira_fields=jira_fields,
-        )
+        try:
+            resolved, coerced = _build_resolved_value(
+                source_header,
+                raw_value,
+                org_config,
+                jira_fields=jira_fields,
+            )
+        except ValueError as exc:
+            # OQ-4: a bad cell (e.g. text in a number column) fails this row
+            # only, instead of aborting the whole preview with a traceback.
+            conversion_errors.append(
+                f"Row {row_number}: column '{source_header}': could not convert "
+                f"value {raw_value!r} ({exc})"
+            )
+            continue
         resolved_columns[source_header] = resolved
 
         if resolved.jira_field is None:
@@ -172,6 +182,16 @@ def build_row_payload(
     _apply_defaults(fields, org_config)
 
     summary = str(fields.get("summary", "")).strip()
+    if conversion_errors:
+        return RowBuildResult(
+            row_number=row_number,
+            summary=summary or "<missing summary>",
+            success=False,
+            payload=None,
+            warnings=warnings,
+            error="; ".join(conversion_errors),
+            resolved_columns=resolved_columns,
+        )
     if not summary:
         return RowBuildResult(
             row_number=row_number,
