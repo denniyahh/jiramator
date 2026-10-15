@@ -737,6 +737,15 @@ def import_command(
         console.print(render_preflight_report(preflight))
         console.print("[red bold]Aborting — fix the rows above. No issues were created.[/]")
         sys.exit(1)
+    if preflight is not None and preflight.status == "unavailable":
+        # D-02: warn loudly, then proceed exactly as before. Caveats on a
+        # passing run are deliberately not printed (dry-run/abort only).
+        reason = escape(preflight.reason or "unknown error")
+        console.print(
+            f"[yellow bold]⚠ Schema validation skipped: could not fetch Jira create "
+            f"metadata ({reason}). Row problems may surface as Jira 400 errors "
+            f"during creation.[/]"
+        )
 
     # Finalize report status.
     report.ended_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
