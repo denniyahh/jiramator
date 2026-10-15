@@ -22,7 +22,7 @@ from jiramator.import_preflight import (
     render_preflight_report,
     run_preflight,
 )
-from jiramator.importer import _row_template_key, build_preview_report
+from jiramator.importer import _row_template_key, build_preview_report, build_row_payload
 from jiramator.jira_client import JiraApiError
 
 _CONFIGS_DIR = Path(__file__).parent.parent / "configs"
@@ -389,7 +389,8 @@ class TestPreflightAvailability:
 
         result = _preflight(client, rows, _problem_org_config())
 
-        assert result.status == "passed"
+        # Build failures are still reported (D-08), without any Jira call.
+        assert result.status == "problems"
         assert result.checked_rows == 0
         assert client.mock_calls == []
 
@@ -618,3 +619,136 @@ class TestPreflightDeferred:
         assert "Not preflight-validated:" in text
         assert "Row 1 'Synthetic [bold]A[/]' [Risk]:" in text
         assert "rows have problems" not in text
+
+
+# ---------------------------------------------------------------------------
+# Coercion failures (OQ-4) and build-failed rows in the report (D-08)
+# ---------------------------------------------------------------------------
+
+
+class TestRowBuildCoercionErrors:
+    def test_non_numeric_number_cell_is_row_build_error(self):
+        org_config, team_config = _example_configs()
+
+        result = build_row_payload(
+            {"Summary": "Synthetic A", "Overall Risk Value": "abc"},
+            row_number=2,
+            org_config=org_config,
+            team_config=team_config,
+        )
+
+        assert result.success is False
+        assert result.payload is None
+        assert result.summary == "Synthetic A"
+        assert "Row 2: column 'Overall Risk Value': could not convert value 'abc'" in (
+            result.error or ""
+        )
+
+    def test_other_rows_still_build_and_preview_does_not_raise(self):
+        org_config, team_config = _example_configs()
+        rows = [
+            {"Summary": "Synthetic A", "Overall Risk Value": "3"},
+            {"Summary": "Synthetic B", "Overall Risk Value": "lots"},
+            {"Summary": "Synthetic C"},
+        ]
+
+        preview = build_preview_report(rows, org_config=org_config, team_config=team_config)
+
+        assert [r.success for r in preview.row_results] == [True, False, True]
+        assert preview.failed_rows == 1
+        assert preview.row_results[0].payload["fields"]["customfield_11905"] == 3
+
+    def test_coercion_error_without_summary_uses_placeholder(self):
+        org_config, team_config = _example_configs()
+
+        result = build_row_payload(
+            {"Overall Risk Value": "n/a"},
+            row_number=1,
+            org_config=org_config,
+            team_config=team_config,
+        )
+
+        assert result.success is False
+        assert result.summary == "<missing summary>"
+        assert "could not convert value 'n/a'" in (result.error or "")
+
+
+class TestPreflightBuildFailures:
+    def test_build_failed_row_is_listed_with_its_error(self):
+        client = _client(fields=_problem_createmeta())
+        rows = [
+            {"Summary": "Synthetic A", "Repositories": "r"},
+            {"Summary": ""},
+        ]
+
+        result = _preflight(client, rows, _problem_org_config())
+
+        assert result.status == "problems"
+        assert result.considered_rows == 2
+        assert result.checked_rows == 1
+        assert [row.row_number for row in result.rows] == [1, 2]
+        failed = result.rows[1]
+        assert failed.issue_type is None
+        assert failed.problems == ["Row 2: required field 'summary' is missing or empty"]
+
+    def test_build_failed_rows_merged_in_row_order(self):
+        client = _client(fields=_problem_createmeta())
+        rows = [
+            {"Summary": ""},
+            {"Summary": "Synthetic B", "Repositories": "r"},
+            {"Summary": ""},
+        ]
+
+        result = _preflight(client, rows, _problem_org_config())
+
+        assert [row.row_number for row in result.rows] == [1, 2, 3]
+        assert [row.row_number for row in result.problem_rows] == [1, 3]
+
+    def test_resume_skipped_build_failed_row_not_listed(self):
+        client = _client(fields=_problem_createmeta())
+        rows = [
+            {"Summary": ""},
+            {"Summary": "Synthetic B", "Repositories": "r"},
+        ]
+
+        result = _preflight(
+            client,
+            rows,
+            _problem_org_config(),
+            skip_template_keys=frozenset({_row_template_key(1, "<missing summary>")}),
+            template_key_fn=_row_template_key,
+        )
+
+        assert result.status == "passed"
+        assert result.considered_rows == 1
+        assert [row.row_number for row in result.rows] == [2]
+
+    def test_unavailable_drops_build_failed_rows(self):
+        client = _client()
+        client.get_createmeta_issue_types.side_effect = requests.exceptions.ConnectionError("down")
+        rows = [{"Summary": "Synthetic A"}, {"Summary": ""}]
+
+        result = _preflight(client, rows, _problem_org_config())
+
+        assert result.status == "unavailable"
+        assert result.rows == []
+
+    def test_only_build_failed_rows_make_no_client_calls(self):
+        client = _client()
+        rows = [{"Summary": ""}]
+
+        result = _preflight(client, rows, _problem_org_config())
+
+        assert result.status == "problems"
+        assert [row.row_number for row in result.problem_rows] == [1]
+        assert client.mock_calls == []
+
+    def test_build_failed_row_header_has_no_bracket(self):
+        client = _client()
+        rows = [{"Summary": ""}]
+
+        text = _export(render_preflight_report(_preflight(client, rows, _problem_org_config())))
+
+        assert "Row 1 '<missing summary>':" in text
+        assert "required field 'summary' is missing or empty" in text
+        assert "1 of 1 rows have problems" in text
