@@ -5,6 +5,8 @@ All notable changes to Jiramator are documented here. This project adheres to
 
 ## [Unreleased]
 
+## [1.3.0] — 2026-10-16
+
 ### Changed
 - **`plan` detects existing sprints instead of asking.** When neither
   `--sprints-exist`/`--no-sprints-exist` nor `sprints_exist:` in the team
@@ -282,6 +284,7 @@ Initial release.
 - CSV encoding auto-detection with `--encoding` override.
 - Preview-first safety model: `--dry-run` on every command.
 
+[1.3.0]: https://github.com/denniyahh/jiramator/releases/tag/v1.3.0
 [1.2.9]: https://github.com/denniyahh/jiramator/releases/tag/v1.2.9
 [1.2.8]: https://github.com/denniyahh/jiramator/releases/tag/v1.2.8
 [1.2.7]: https://github.com/denniyahh/jiramator/releases/tag/v1.2.7
