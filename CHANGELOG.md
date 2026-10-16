@@ -5,6 +5,15 @@ All notable changes to Jiramator are documented here. This project adheres to
 
 ## [Unreleased]
 
+### Changed
+- **`plan` detects existing sprints instead of asking.** When neither
+  `--sprints-exist`/`--no-sprints-exist` nor `sprints_exist:` in the team
+  config is set, `plan` now checks the team's board (read-only) for any of
+  this PI's sprints named by `sprint_name_template`, and assigns sprints only
+  if they're there. If the board can't be checked (no credentials, Jira
+  unreachable, no `sprint_name_template`), it falls back to the previous
+  behavior: ask on a TTY, error otherwise. The flag and config key still win.
+
 ### Fixed
 - **Long-sprint tickets are now placed in a sprint.** With sprints existing,
   `plan` matched the per-sprint "6a"/"6b" tickets against sprint names like

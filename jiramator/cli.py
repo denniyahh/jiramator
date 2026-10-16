@@ -350,7 +350,8 @@ def init(org_config_dir: Path, team_config_dir: Path, force: bool) -> None:
     help=(
         "Whether sprints for this PI already exist in Jira. "
         "If unset, falls back to 'sprints_exist:' in the team config, "
-        "then to an interactive prompt (or errors if stdin is not a TTY). "
+        "then checks the board for this PI's sprints, then to an "
+        "interactive prompt (or errors if stdin is not a TTY). "
         "Use --no-sprints-exist for sprintless runs (no Jira board API call)."
     ),
 )

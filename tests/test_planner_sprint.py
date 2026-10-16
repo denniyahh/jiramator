@@ -259,15 +259,133 @@ class TestSprintsExistResolution:
         exc = exc_info.value
         assert exc.field_path == "sprints_exist"
         assert exc.reason == (
-            "Cannot determine whether sprints exist: stdin is not a TTY "
-            "and neither --sprints-exist/--no-sprints-exist nor "
-            "'sprints_exist:' in team config is set."
+            "Cannot determine whether sprints exist: stdin is not a TTY, "
+            "neither --sprints-exist/--no-sprints-exist nor 'sprints_exist:' "
+            "in team config is set, and the board could not be checked."
         )
         # str(exc) starts with <runtime>: sprints_exist — (Phase 1 formatter)
         s = str(exc)
         assert "<runtime>" in s
         assert "sprints_exist" in s
         prompt_mock.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Sprint auto-detection (config/flag unset → check the board before prompting)
+# ---------------------------------------------------------------------------
+
+
+def _make_detect_org_config(count=6):
+    oc = MagicMock()
+    oc.sprints.count = count
+    return oc
+
+
+class TestSprintsExistAutoDetect:
+    """Tests for ``_detect_sprints_exist`` and its place in the resolution order."""
+
+    def _patch_client(self, monkeypatch, sprints=None, error=None):
+        from jiramator import planner
+
+        client = MagicMock()
+        if error is not None:
+            client.get_board_sprints.side_effect = error
+        else:
+            client.get_board_sprints.return_value = sprints or []
+        factory = MagicMock(return_value=client)
+        monkeypatch.setattr(planner, "JiraClient", factory)
+        return factory, client
+
+    def _resolve(self, monkeypatch, tty=False):
+        from jiramator import planner
+
+        prompt_mock = MagicMock(return_value=True)
+        monkeypatch.setattr(planner, "_prompt_sprints_exist", prompt_mock)
+        monkeypatch.setattr(planner.sys.stdin, "isatty", lambda: tty, raising=False)
+        result = planner._resolve_sprints_exist_mode(
+            _make_team_with_sprints_exist(None), None, _make_console(),
+            org_config=_make_detect_org_config(), pi_num="27.1",
+        )
+        return result, prompt_mock
+
+    def test_pi_sprints_on_board_detected_true_without_prompt(self, monkeypatch):
+        _, client = self._patch_client(
+            monkeypatch,
+            sprints=[{"id": 1, "name": "PI-27.1.1-Calc -TI83", "state": "future"}],
+        )
+
+        result, prompt_mock = self._resolve(monkeypatch, tty=True)
+
+        assert result is True
+        client.get_board_sprints.assert_called_once_with(362)
+        prompt_mock.assert_not_called()
+
+    def test_no_pi_sprints_on_board_detected_false_without_prompt(self, monkeypatch):
+        self._patch_client(
+            monkeypatch,
+            sprints=[{"id": 1, "name": "PI-26.4.6-Calc -TI83", "state": "active"}],
+        )
+
+        result, prompt_mock = self._resolve(monkeypatch, tty=True)
+
+        assert result is False
+        prompt_mock.assert_not_called()
+
+    def test_missing_credentials_falls_back_to_prompt(self, monkeypatch):
+        from jiramator import planner
+
+        monkeypatch.setattr(
+            planner, "JiraClient", MagicMock(side_effect=ValueError("no creds"))
+        )
+
+        result, prompt_mock = self._resolve(monkeypatch, tty=True)
+
+        assert result is True
+        prompt_mock.assert_called_once()
+
+    def test_jira_error_non_tty_raises(self, monkeypatch):
+        from jiramator.error_format import ConfigValidationError
+        from jiramator.jira_client import JiraApiError
+
+        self._patch_client(monkeypatch, error=JiraApiError("boom", 500))
+
+        with pytest.raises(ConfigValidationError):
+            self._resolve(monkeypatch, tty=False)
+
+    def test_network_error_falls_back_to_prompt(self, monkeypatch):
+        import requests
+
+        self._patch_client(monkeypatch, error=requests.ConnectionError("down"))
+
+        result, prompt_mock = self._resolve(monkeypatch, tty=True)
+
+        assert result is True
+        prompt_mock.assert_called_once()
+
+    def test_config_value_skips_detection(self, monkeypatch):
+        from jiramator import planner
+
+        factory, _ = self._patch_client(monkeypatch)
+
+        result = planner._resolve_sprints_exist_mode(
+            _make_team_with_sprints_exist(False), None, _make_console(),
+            org_config=_make_detect_org_config(), pi_num="27.1",
+        )
+
+        assert result is False
+        factory.assert_not_called()
+
+    def test_no_template_returns_none(self, monkeypatch):
+        from jiramator import planner
+
+        factory, _ = self._patch_client(monkeypatch)
+        tc = _make_team_with_sprints_exist(None)
+        tc.sprint_name_template = None
+
+        assert planner._detect_sprints_exist(
+            _make_detect_org_config(), tc, "27.1", _make_console()
+        ) is None
+        factory.assert_not_called()
 
 
 class TestSprintsExistIntegration:
