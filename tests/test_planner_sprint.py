@@ -111,6 +111,41 @@ class TestResolveSprintIds:
         assert payloads[0]["fields"][_DEFAULT_SPRINT_FIELD] == 200
         assert payloads[1]["fields"][_DEFAULT_SPRINT_FIELD] == 201
 
+    def test_long_sprint_suffix_falls_back_to_base_sprint(self):
+        """Without a dedicated 6a/6b sprint, both resolve to the single Sprint 6."""
+        sprints = [{"id": 300, "name": "PI-28.6-Calc -TI83", "state": "future"}]
+        client = _make_client(sprints)
+        payloads = [
+            {"fields": {"summary": "Prod Support 6a"}, "_sprint_num": "6a"},
+            {"fields": {"summary": "Prod Support 6b"}, "_sprint_num": "6b"},
+        ]
+
+        _resolve_sprint_ids(
+            client, _make_org_config(), _make_team_config(), "28", payloads, _make_console()
+        )
+
+        assert payloads[0]["fields"][_DEFAULT_SPRINT_FIELD] == 300
+        assert payloads[1]["fields"][_DEFAULT_SPRINT_FIELD] == 300
+        assert "_sprint_num" not in payloads[0]
+
+    def test_long_sprint_suffix_prefers_dedicated_sprint_over_base(self):
+        sprints = [
+            {"id": 300, "name": "PI-28.6-Calc -TI83", "state": "future"},
+            {"id": 301, "name": "PI-28.6a-Calc -TI83", "state": "future"},
+        ]
+        client = _make_client(sprints)
+        payloads = [
+            {"fields": {"summary": "Prod Support 6a"}, "_sprint_num": "6a"},
+            {"fields": {"summary": "Prod Support 6b"}, "_sprint_num": "6b"},
+        ]
+
+        _resolve_sprint_ids(
+            client, _make_org_config(), _make_team_config(), "28", payloads, _make_console()
+        )
+
+        assert payloads[0]["fields"][_DEFAULT_SPRINT_FIELD] == 301
+        assert payloads[1]["fields"][_DEFAULT_SPRINT_FIELD] == 300
+
     def test_custom_sprint_field_from_org_config(self):
         """When org_config defines sprint_field, that ID is used instead of the default."""
         sprints = [{"id": 100, "name": "PI-28.2-Calc -TI83", "state": "future"}]
@@ -368,3 +403,57 @@ class TestSprintsExistIntegration:
 
         assert result is False
         prompt_mock.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# End-to-end sprint placement: build_all → _resolve_sprint_ids (2/3-release PIs)
+# ---------------------------------------------------------------------------
+
+
+class TestSprintPlacementEndToEnd:
+    """Every built ticket lands in the scheduled sprint on a one-sprint-per-number board."""
+
+    @pytest.mark.parametrize(
+        ("versions", "expected_release_sprints"),
+        [
+            (["26.4.1", "27.1.0"], {"26.4.1": ("4", "5"), "27.1.0": ("5", "6")}),
+            (
+                ["26.1.1", "26.1.2", "26.2.0"],
+                {"26.1.1": ("2", "3"), "26.1.2": ("4", "5"), "26.2.0": ("5", "6")},
+            ),
+        ],
+    )
+    def test_all_tickets_placed_in_scheduled_sprint(
+        self, org_config_path, team_config_path, versions, expected_release_sprints
+    ):
+        from jiramator.config import load_org_config, load_team_config
+        from jiramator.ticket_builder import build_all
+
+        org, _ = load_org_config(org_config_path)
+        team, _ = load_team_config(team_config_path)
+        # Calcs' real 2-release schedule (fixture only carries the 3-release one).
+        team.release_sprint_schedule[2] = [{"pre": 4, "post": 5}, {"pre": 5, "post": 6}]
+
+        payloads = build_all(org, team, "PI28", "28", versions, epic_keys={})
+        tickets = payloads["per_release"] + payloads["per_sprint"]
+        sprint_ids = {str(n): 1000 + n for n in range(1, 7)}
+        client = _make_client(
+            [
+                {"id": sid, "name": f"PI-28.{num}-Calc -TI83", "state": "future"}
+                for num, sid in sprint_ids.items()
+            ]
+        )
+
+        _resolve_sprint_ids(client, org, team, "28", tickets, _make_console())
+
+        for ticket in payloads["per_release"]:
+            fields = ticket["fields"]
+            version = fields["fixVersions"][0]["name"]
+            pre, post = expected_release_sprints[version]
+            expected = post if "post-regression" in fields["summary"].lower() else pre
+            assert fields[_DEFAULT_SPRINT_FIELD] == sprint_ids[expected], fields["summary"]
+        for ticket in payloads["per_sprint"]:
+            summary = ticket["fields"]["summary"]
+            base = summary.split("Sprint ")[1].rstrip(")").rstrip("ab")
+            assert ticket["fields"][_DEFAULT_SPRINT_FIELD] == sprint_ids[base], summary
+        assert all("_sprint_num" not in t for t in tickets)
