@@ -25,6 +25,7 @@ the (unvalidated) preview rather than failing.
 """
 from __future__ import annotations
 
+import re
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -56,6 +57,9 @@ from jiramator.ticket_builder import _strip_template_key, build_all
 
 # Default sprint field ID in Jira (overridable via org_config.custom_fields["sprint_field"])
 _DEFAULT_SPRINT_FIELD = "customfield_10021"
+
+# Suffixed long-sprint label ("6a") → base sprint number group ("6")
+_LONG_SPRINT_LABEL_RE = re.compile(r"(\d+)[A-Za-z]+")
 
 
 # ---------------------------------------------------------------------------
@@ -548,6 +552,8 @@ def _resolve_sprint_ids(
     sprint_name_template, and injects the sprint custom field into each payload.
     The sprint field ID is read from ``org_config.custom_fields["sprint_field"]``,
     falling back to ``customfield_10021`` if not configured.
+    Long-sprint labels (``"6a"``, ``"6b"``) resolve to a matching suffixed
+    sprint if the board has one, otherwise to the base sprint (``"6"``).
     Mutates payloads in place. Strips ``_sprint_num`` after resolution.
 
     Args:
@@ -574,14 +580,22 @@ def _resolve_sprint_ids(
     sprint_num_to_id: dict[str, int] = {}
     unresolved: list[str] = []
     for num in sorted(needed_nums):
-        expected_name = team_config.sprint_name_template.format(
-            pi_num=pi_num, sprint_num=num,
-        )
-        if expected_name in sprint_name_to_id:
-            sprint_num_to_id[num] = sprint_name_to_id[expected_name]
-            console.print(
-                f"  [green]✓[/] Sprint {num} → [cyan]{expected_name}[/] (id={sprint_num_to_id[num]})"
+        # Long-sprint labels ("6a", "6b") prefer a dedicated suffixed sprint,
+        # then fall back to the base sprint ("6") when the board has only one.
+        candidates = [num]
+        base_match = _LONG_SPRINT_LABEL_RE.fullmatch(num)
+        if base_match:
+            candidates.append(base_match.group(1))
+        for candidate in candidates:
+            expected_name = team_config.sprint_name_template.format(
+                pi_num=pi_num, sprint_num=candidate,
             )
+            if expected_name in sprint_name_to_id:
+                sprint_num_to_id[num] = sprint_name_to_id[expected_name]
+                console.print(
+                    f"  [green]✓[/] Sprint {num} → [cyan]{expected_name}[/] (id={sprint_num_to_id[num]})"
+                )
+                break
         else:
             unresolved.append(num)
 

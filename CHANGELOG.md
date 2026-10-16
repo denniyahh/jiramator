@@ -5,6 +5,14 @@ All notable changes to Jiramator are documented here. This project adheres to
 
 ## [Unreleased]
 
+### Fixed
+- **Long-sprint tickets are now placed in a sprint.** With sprints existing,
+  `plan` matched the per-sprint "6a"/"6b" tickets against sprint names like
+  `…Sprint6a…`, which boards with a single Sprint 6 don't have, so those
+  tickets were created without a sprint. Suffixed labels now fall back to the
+  base sprint (`6`) when no dedicated suffixed sprint exists; boards that do
+  have separate 6a/6b sprints still use them.
+
 ## [1.2.9] — 2026-10-16
 
 ### Added
