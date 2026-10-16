@@ -214,30 +214,92 @@ def _prompt_sprints_exist(console: Console) -> bool:
     )
 
 
+def _detect_sprints_exist(
+    org_config: OrgConfig,
+    team_config: TeamConfig,
+    pi_num: str,
+    console: Console,
+) -> bool | None:
+    """Check the team's board for this PI's sprints (read-only).
+
+    Renders ``sprint_name_template`` for sprints ``1..org_config.sprints.count``
+    and looks for any of those names among the board's active/future sprints.
+
+    Args:
+        org_config: Organization config (credentials, sprint count).
+        team_config: Team config with ``board_id`` and ``sprint_name_template``.
+        pi_num: The PI number (e.g. "27.1").
+        console: Rich console for output.
+
+    Returns:
+        True if at least one of the PI's sprints exists, False if none do,
+        or None if detection could not run (no template, no credentials,
+        or Jira unreachable).
+    """
+    template = team_config.sprint_name_template
+    if team_config.board_id is None or not template:
+        return None
+    try:
+        client = JiraClient(org_config)
+        sprints = client.get_board_sprints(team_config.board_id)
+    except ValueError:
+        return None
+    except (JiraApiError, requests.RequestException) as exc:
+        console.print(f"  [yellow]⚠ Could not check board for sprints:[/] {exc}")
+        return None
+
+    board_names = {s["name"] for s in sprints}
+    expected = [
+        template.format(pi_num=pi_num, sprint_num=n)
+        for n in range(1, org_config.sprints.count + 1)
+    ]
+    found = [name for name in expected if name in board_names]
+    if found:
+        console.print(
+            f"  [green]✓[/] Found {len(found)} of {len(expected)} sprints for "
+            f"PI {pi_num} on board {team_config.board_id}."
+        )
+        return True
+    console.print(
+        f"  No sprints for PI {pi_num} found on board {team_config.board_id} "
+        f"(looked for e.g. [cyan]{escape(expected[0])}[/])."
+    )
+    return False
+
+
 def _resolve_sprints_exist_mode(
     team_config: TeamConfig,
     cli_override: bool | None,
     console: Console,
+    *,
+    org_config: OrgConfig | None = None,
+    pi_num: str | None = None,
 ) -> bool:
     """Resolve whether sprints exist for the current run (Plan 02-03).
 
-    Priority order (DC-6 — exactly one branch runs per call):
+    Priority order (DC-6 — the first branch that yields a value wins):
       1. CLI flag (--sprints-exist / --no-sprints-exist) → cli_override
       2. team_config.sprints_exist (config field)
-      3. Interactive prompt iff sys.stdin.isatty()
-      4. ConfigValidationError otherwise (non-TTY, no flag, no config)
+      3. Auto-detect on the board (needs ``org_config`` + ``pi_num``,
+         ``sprint_name_template`` and Jira credentials)
+      4. Interactive prompt iff sys.stdin.isatty()
+      5. ConfigValidationError otherwise (non-TTY, nothing else decided)
 
     Returns:
         True if sprints should be resolved, False to skip resolution.
 
     Raises:
-        ConfigValidationError: branch (4) — non-TTY with neither flag nor
-            config providing a value.
+        ConfigValidationError: branch (5) — non-TTY with neither flag, config
+            nor board detection providing a value.
     """
     if cli_override is not None:
         return cli_override
     if team_config.sprints_exist is not None:
         return team_config.sprints_exist
+    if org_config is not None and pi_num is not None:
+        detected = _detect_sprints_exist(org_config, team_config, pi_num, console)
+        if detected is not None:
+            return detected
     if sys.stdin.isatty():
         return _prompt_sprints_exist(console)
     raise ConfigValidationError(
@@ -245,9 +307,9 @@ def _resolve_sprints_exist_mode(
         line=None,
         field_path="sprints_exist",
         reason=(
-            "Cannot determine whether sprints exist: stdin is not a TTY "
-            "and neither --sprints-exist/--no-sprints-exist nor "
-            "'sprints_exist:' in team config is set."
+            "Cannot determine whether sprints exist: stdin is not a TTY, "
+            "neither --sprints-exist/--no-sprints-exist nor 'sprints_exist:' "
+            "in team config is set, and the board could not be checked."
         ),
     )
 
@@ -866,7 +928,8 @@ def _run_plan_inner(
     sprints_exist: bool = False
     if team_config.board_id is not None:
         sprints_exist = _resolve_sprints_exist_mode(
-            team_config, sprints_exist_override, console
+            team_config, sprints_exist_override, console,
+            org_config=org_config, pi_num=pi_num,
         )
         if sprints_exist:
             console.print(
