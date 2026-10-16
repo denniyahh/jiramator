@@ -5,6 +5,8 @@ All notable changes to Jiramator are documented here. This project adheres to
 
 ## [Unreleased]
 
+## [1.2.9] — 2026-10-16
+
 ### Added
 - **Ruff linting.** `ruff` is now a dev dependency, configured in `pyproject.toml`
   (`E`, `F`, `W`, `I`, `UP`, `B`), and enforced by a new `lint` job in CI. Existing
@@ -263,6 +265,7 @@ Initial release.
 - CSV encoding auto-detection with `--encoding` override.
 - Preview-first safety model: `--dry-run` on every command.
 
+[1.2.9]: https://github.com/denniyahh/jiramator/releases/tag/v1.2.9
 [1.2.8]: https://github.com/denniyahh/jiramator/releases/tag/v1.2.8
 [1.2.7]: https://github.com/denniyahh/jiramator/releases/tag/v1.2.7
 [1.2.6]: https://github.com/denniyahh/jiramator/releases/tag/v1.2.6
