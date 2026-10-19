@@ -4,17 +4,17 @@ milestone: v1.2.9
 milestone_name: Hardening
 current_phase: 02
 current_phase_name: import-preflight-validation
-status: executing
-stopped_at: Phase 2 planned (4 plans, 3 waves; checker passed iteration 2); awaiting user review of [auto] decisions D-01/D-03 + OQ-1..5 before /gsd-execute-phase 02
-last_updated: "2026-10-09T17:24:22.012Z"
-last_activity: 2026-10-08
-last_activity_desc: Phase 01 complete, transitioned to Phase 2
-state_head: 8768b35ea1c2baf7b99d1961af75c19512317ea8
+status: verifying
+stopped_at: Phase 02 executed; verification human_needed — 4 live-Jira UAT items in 02-UAT.md; next /gsd-verify-work 02
+last_updated: "2026-10-15T17:52:37.776Z"
+last_activity: 2026-10-15
+last_activity_desc: Phase 02 execution started
+state_head: b7b79ae942bf5f94e380359406bacef44b4d8117
 progress:
   total_phases: 4
   completed_phases: 1
   total_plans: 9
-  completed_plans: 5
+  completed_plans: 9
 ---
 
 # Project State
@@ -24,14 +24,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-08)
 
 **Core value:** Bulk Jira writes must be correct and safe to re-run — never silently assign, create, or modify the wrong thing.
-**Current focus:** Phase 2 — Import Preflight Validation
+**Current focus:** Phase 02 — import-preflight-validation
 
 ## Current Position
 
-Phase: 02 (import-preflight-validation) — READY TO EXECUTE
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-10-08 — Phase 01 complete, transitioned to Phase 2
+Phase: 02 (import-preflight-validation) — EXECUTING
+Plan: 4 of 4
+Status: verifying
+Last activity: 2026-10-15 — Phase 02 execution started
 
 Progress: [███░░░░░░░] 25%
 
@@ -60,6 +60,10 @@ Progress: [███░░░░░░░] 25%
 | Phase 01 P01 | 4min | 3 tasks | 10 files |
 | Phase 01 P02 | 4min | 2 tasks | 5 files |
 | Phase 01 P03 | 20min | 3 tasks | 2 files |
+| Phase 02 P01 | 5min | 2 tasks | 7 files |
+| Phase 02 P02 | 6min | 2 tasks | 6 files |
+| Phase 02 P04 | 5min | 3 tasks | 6 files |
+| Phase 02 P03 | 9min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -82,6 +86,14 @@ Recent decisions affecting current work:
 - [Phase 01]: INV-01 closed 2026-10-05 as user-accepted residual FA-INV-01 (c,d,e,f,g,h,j); k ruled out by JQL (no writes)
 - [Phase 01]: Redaction case-insensitive + base64 email:token, applied to plan/import/update reports; over-redaction accepted (UAT 3)
 - [Phase 01]: Abort-text deviations accepted via 2 verification overrides (UAT 4); CHANGELOG corrected
+- [Phase 02]: 02-01: import preflight skips allowedValues only for issuetype (OQ-1); fixVersions validated for import
+- [Phase 02]: 02-01: any createmeta fetch failure makes import preflight 'unavailable' (OQ-5); import --dry-run exits 1 on problems (D-03)
+- [Phase 02]: Live import tests use tests/conftest.py stub_createmeta + PermissiveFieldMeta (permissive lookups, explicit-only iteration) so live preflight sees zero problems unless a test opts in
+- [Phase 02]: 02-04: caveat-only (deferred required) rows render under 'Not preflight-validated:' and never count as problems
+- [Phase 02]: 02-04: build-failed rows join the preflight report (D-08); only-build-failed runs make zero client calls and return 'problems'
+- [Phase 02]: 02-04: import preview/execution reports printed with markup=False (MarkupError fix)
+- [Phase 02]: 02-03: Live import runs preflight before summary dedup/any create; any problem row aborts with nothing created (report failed/Aborted, one failed entry per row, exit 1)
+- [Phase 02]: 02-03: Live createmeta unavailable → CLI prints loud 'Jira 400' warning and proceeds unchanged; passing live runs print no preflight section (no caveats)
 
 ### Pending Todos
 
@@ -105,6 +117,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-09T17:24:21.970Z
-Stopped at: Phase 2 planned (4 plans, 3 waves; checker passed iteration 2); awaiting user review of [auto] decisions D-01/D-03 + OQ-1..5 before /gsd-execute-phase 02
-Resume file: .planning/phases/02-import-preflight-validation/02-01-PLAN.md
+Last session: 2026-10-15T17:43:03.546Z
+Stopped at: Phase 02 executed; verification human_needed — 4 live-Jira UAT items in 02-UAT.md; next /gsd-verify-work 02
+Resume file: None

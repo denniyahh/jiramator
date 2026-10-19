@@ -11,7 +11,7 @@
     {
       "number": "2",
       "name": "Import Preflight Validation",
-      "status": "pending"
+      "status": "in_progress"
     },
     {
       "number": "3",
@@ -26,8 +26,8 @@
   ],
   "next": {
     "command": "/gsd-progress --next",
-    "label": "Advance to the next step",
-    "reason": "Phase 02 of 4 · executing"
+    "label": "Advance to the next step (verify)",
+    "reason": "Phase 02 of 4 · ready to verify"
   },
-  "updated_at": "2026-10-09T17:24:05.612Z"
+  "updated_at": "2026-10-15T17:43:02.548Z"
 }

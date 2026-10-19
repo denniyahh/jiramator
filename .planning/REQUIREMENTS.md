@@ -18,10 +18,10 @@ defect. Feature work moved to v1.3 candidate seeds in `.planning/seeds/`.
 
 ### Import Preflight (PRE)
 
-- [ ] **PRE-01**: `import --dry-run` with credentials checks every row's payload against Jira's createmeta schema for its project and issue type, and lists each row's missing required fields before anything is written
-- [ ] **PRE-02**: The same preview reports select/option values Jira will reject, and plain-text values where Jira expects ADF
-- [ ] **PRE-03**: A live `import` runs the same check before creating anything and reports every failing row at once, instead of surfacing them one Jira 400 at a time
-- [ ] **PRE-04**: Without credentials or Jira access, `import --dry-run` still previews and states that schema validation was skipped (same degrade behaviour as `plan`)
+- [x] **PRE-01**: `import --dry-run` with credentials checks every row's payload against Jira's createmeta schema for its project and issue type, and lists each row's missing required fields before anything is written
+- [x] **PRE-02**: The same preview reports select/option values Jira will reject, and plain-text values where Jira expects ADF
+- [x] **PRE-03**: A live `import` runs the same check before creating anything and reports every failing row at once, instead of surfacing them one Jira 400 at a time
+- [x] **PRE-04**: Without credentials or Jira access, `import --dry-run` still previews and states that schema validation was skipped (same degrade behaviour as `plan`)
 
 ### User Resolution (USER)
 
@@ -69,10 +69,10 @@ smoke suite, dead `__version__` removal.
 | INV-02 | Phase 1 | Complete |
 | INV-03 | Phase 1 | Complete |
 | INV-04 | Phase 1 | Complete |
-| PRE-01 | Phase 2 | Pending |
-| PRE-02 | Phase 2 | Pending |
-| PRE-03 | Phase 2 | Pending |
-| PRE-04 | Phase 2 | Pending |
+| PRE-01 | Phase 2 | Complete |
+| PRE-02 | Phase 2 | Complete |
+| PRE-03 | Phase 2 | Complete |
+| PRE-04 | Phase 2 | Complete |
 | USER-01 | Phase 3 | Pending |
 | USER-02 | Phase 3 | Pending |
 | USER-03 | Phase 3 | Pending |
