@@ -1,8 +1,8 @@
 ---
 phase: 02-import-preflight-validation
-verified: 2026-10-15T18:10:00Z
+verified: 2026-10-19T15:01:04Z
 status: human_needed
-score: 4/4 must-haves verified (roadmap success criteria); 0 behavior-unverified
+score: 4/4 roadmap success criteria verified; 52/53 plan truths verified (1 backstop truth insufficient_spec); 0 behavior-unverified
 covered_files:
   - ".planning/phases/02-import-preflight-validation/02-01-PLAN.md"
   - ".planning/phases/02-import-preflight-validation/02-01-SUMMARY.md"
@@ -28,132 +28,172 @@ covered_files:
   - "tests/test_importer.py"
   - "tests/test_importer_report.py"
   - "tests/test_payload_validator.py"
-covered_digest: "v3:sha256:0e75588126767715a925cdb02b656e43ee3d94db08175a34f09e26700cd2addc"
+covered_digest: "v3:sha256:9d10acb0cad0178b047e707fe86c4cce529b212796681f12497b17b0a48b4d53"
 behavior_unverified: 0
 overrides_applied: 0
+re_verification:
+  previous_status: human_needed
+  previous_score: 4/4 must-haves verified (roadmap success criteria)
+  reason: "prior report STALE — covered_digest no longer matched covered files (WR-01 fix 80b02d3 landed after it)"
+  gaps_closed: []
+  gaps_remaining: []
+  regressions: []
 human_verification:
-  - test: "Live smoke: `jiramator import --dry-run` against real Jira on the 2026-09-02-shaped Risk sheet"
-    expected: "Preview prints, then a validation section listing missing 'Fix versions' (fixVersions) on all 6 rows and 'Repositories' (customfield_11941) on rows 2-3 (8 problems), the line '6 of 6 rows have problems', exit code 1, nothing created in Jira"
-    why_human: "No live Jira access in this verification environment; this is the roadmap SC1 live replay and cannot be exercised without real credentials/instance"
-  - test: "Same sheet with JIRA_TOKEN unset"
-    expected: "'Schema validation skipped' printed, exit code 0"
-    why_human: "Requires toggling real environment credentials against a live Jira instance"
-  - test: "Live smoke abort check: a live `import` (no --dry-run) against real Jira on a sheet with problem rows"
-    expected: "Run aborts before creating anything, prints every failing row and 'Aborting — fix the rows above. No issues were created.', exits 1, report status 'failed' with error.type 'Aborted'"
-    why_human: "No live Jira access available in this environment; PRE-03's core behavior is thoroughly covered by mocked/stubbed tests (TestImportPreflightLiveAbort, TestRunImportPreflightAbort) but the true live-Jira path (real createmeta shapes, real HTTP errors) is unexercised"
-  - test: "Live dry-run with a required Reporter/Parent field against a real Jira create screen"
-    expected: "Caveat 'required <Name> (<id>) depends on live <kind> lookup — not preflight-validated' appears under 'Not preflight-validated:', exit code 0"
-    why_human: "No live Jira access; D-06 caveat logic is unit/integration-tested against mocked createmeta only"
+  - test: "Live smoke: `jiramator import --dry-run` against real Jira on the 2026-09-02-shaped Risk sheet (02-UAT.md #1; 02-03 backstop truth)"
+    expected: "Preview prints, then a validation section listing missing 'Fix versions' (fixVersions) on all 6 rows and 'Repositories' (customfield_11941) on rows 2-3 (8 problems), '6 of 6 rows have problems', exit 1, nothing created in Jira"
+    why_human: "No live Jira here; the plan tags this truth `verification: backstop`, so mocked-createmeta tests cannot discharge it"
+  - test: "Same sheet with JIRA_TOKEN unset (02-UAT.md #2)"
+    expected: "'Schema validation skipped' printed, exit 0"
+    why_human: "Reproduced locally with the example config (exit 0, both warnings printed), but the user's real org config/sheet combination is only checkable by the user"
+  - test: "Live abort: real `import` (no --dry-run) on a sheet with problem rows (02-UAT.md #3)"
+    expected: "Aborts before creating anything, prints every failing row and 'Aborting — fix the rows above. No issues were created.', exit 1, report status 'failed' with error.type 'Aborted'"
+    why_human: "Real createmeta response shapes and HTTP errors unexercised; mocked path is green"
+  - test: "Live dry-run with a required Reporter/Parent field on a real create screen (02-UAT.md #4)"
+    expected: "Caveat 'required <Name> (<id>) depends on live <kind> lookup — not preflight-validated' under 'Not preflight-validated:', exit 0"
+    why_human: "D-06 caveat logic only exercised against mocked createmeta"
+  - test: "Backstop truth (02-01): option-value comparison is exact code-point equality (no Unicode normalization / casefolding) — confirm Jira's create-time comparison agrees, e.g. submit a select value differing only in case or NFC/NFD form against a real select field"
+    expected: "Jira rejects the case/normalization variant (so preflight's exact match is not a false positive), or the assumption is consciously accepted"
+    why_human: "Tagged `verification: backstop` (insufficient_spec): no held-out test exists and the claim is about Jira's server behaviour, not this codebase"
+  - test: "Resolve flagged prohibitions P-02-01..P-02-05 (judgment-tier; verifier verdict is non-authoritative — see Prohibitions table)"
+    expected: "Human confirms or rejects each LLM-judge verdict (all five judged HELD with test evidence)"
+    why_human: "Prohibitions arrive `flagged: true, status: unverified`; per ADR-550 D4 they cannot be silently absorbed into a passed verdict"
 ---
 
 # Phase 2: Import Preflight Validation Verification Report
 
 **Phase Goal:** A user sees every row `import` would fail on — missing required fields, rejected option values, non-ADF rich text — before anything is written to Jira.
-**Verified:** 2026-10-15T18:10:00Z
+**Verified:** 2026-10-19T15:01:04Z
 **Status:** human_needed
-**Re-verification:** No — initial verification
+**Re-verification:** Yes — regeneration of a STALE report (no prior gaps; prior status human_needed). Worktree `jiramator-gsd-phase-02-import-preflight-validation`, branch `gsd/phase-02-import-preflight-validation`, HEAD `80b02d3`.
 
 ## Goal Achievement
 
-### Observable Truths
+### Observable Truths (Roadmap Success Criteria — the contract)
 
-| # | Truth (Roadmap Success Criterion) | Status | Evidence |
+| # | Truth | Status | Evidence |
 |---|---|---|---|
-| 1 | SC1: Replaying the 2026-09-02 Risk import shape with `--dry-run` lists missing `Fix versions` and `Repositories` per row, no Jira writes | ✓ VERIFIED | `tests/test_import_cli.py::TestImportPreflightDryRun::test_sc1_risk_sheet_reports_all_problems_exit_1` passes (mocked createmeta, 6 rows / 8 problems, `create_issue`/`create_issues_bulk`/`find_issue_keys_by_summaries`/`find_user_account_id` asserted never called). Live-Jira replay itself is a deferred human-verification item (no live access here) |
-| 2 | SC2: Invalid select values and plain-text-for-ADF values are reported in the same preview | ✓ VERIFIED | `jiramator/payload_validator.py` implements `_looks_like_adf`/`_is_textarea_or_richtext`/`invalid_option`/`off_screen` kinds; `tests/test_import_preflight.py::test_select_adf_and_fix_version_problems_reported_together` passes, combining select, ADF and fixVersions problems in one `PreflightResult` |
-| 3 | SC3: A live `import` reports all failing rows up front instead of discovering them one 400 at a time | ✓ VERIFIED | `jiramator/importer.py` calls `run_preflight()` after the initial `_persist()` and before `find_issue_keys_by_summaries` (confirmed by reading the live `run_import` body); on `status == "problems"` it records one `failed` IssueResult per row, sets `report.error = abort_info(...)`, persists, and returns before any create call. `jiramator/cli.py` sets `report.status = "failed"` and exits 1 before the partial/success finalization block further down. `tests/test_import_cli.py::TestImportPreflightLiveAbort::test_live_sc1_aborts_before_create_exit_1` asserts report `status=="failed"`, `error.type=="Aborted"`, 6 ordered `failed` issues, and zero create/dedup/user-lookup calls |
-| 4 | SC4: Without credentials, `import --dry-run` still previews and says schema validation was skipped | ✓ VERIFIED | `jiramator/cli.py` dry-run branch: on `JiraClient(org_config)` raising `ValueError`, prints both "Preview based on field_aliases only" and "Schema validation skipped: no Jira credentials available", then proceeds to the (client=None) preview with no preflight call, falling through to `return` (exit 0 implicit). `tests/test_import_cli.py::test_dry_run_degrades_gracefully_without_credentials` passes |
+| 1 | SC1: Replaying the 2026-09-02 Risk shape with `--dry-run` lists missing `Fix versions` and `Repositories` per row, no Jira writes | ✓ VERIFIED (mocked) | Read `cli.py` dry-run branch: builds one `JiraClient`, passes `client=client, dry_run=True` to `run_import`, which calls `run_preflight` and returns before any live code; CLI prints `render_preflight_report` and `sys.exit(1)` on `problems`. `test_import_cli.py::TestImportPreflightDryRun::test_sc1_risk_sheet_reports_all_problems_exit_1` PASSED (asserts create_issue/create_issues_bulk/find_issue_keys_by_summaries/find_user_account_id not called); `test_import_preflight.py::TestPreflightProblems::test_sc1_rows_report_eight_problems_with_column_attribution` PASSED. Literal live replay → human item 1 |
+| 2 | SC2: Invalid select values and plain-text-for-ADF values reported in the same preview | ✓ VERIFIED | `payload_validator.find_payload_problems` emits `adf` (`_is_textarea_or_richtext` && not `_looks_like_adf`) and `invalid_option` kinds in one pass; `run_preflight` passes `skip_allowed_value_field_ids={"issuetype"}` so fixVersions IS checked (D-07). `test_select_adf_and_fix_version_problems_reported_together` PASSED |
+| 3 | SC3: A live `import` reports all failing rows up front instead of one 400 at a time | ✓ VERIFIED | `importer.run_import`: `_persist()` (L383) → `run_preflight` (L389) → on `problems`, one `_record(..., "failed")` per problem row in row order, `report.error = abort_info(...)`, `_persist()`, return — all before `find_issue_keys_by_summaries` (L425) and `create_issue` (L579). `cli.py` sets `status="failed"`, writes report, prints, exits 1 before finalization. `TestImportPreflightLiveAbort::test_live_sc1_aborts_before_create_exit_1`, `TestRunImportPreflightAbort::*` (3) PASSED |
+| 4 | SC4: Without credentials, `import --dry-run` still previews and says schema validation was skipped | ✓ VERIFIED | Code path read; `test_dry_run_degrades_gracefully_without_credentials` PASSED (asserts exit 0 + "Schema validation skipped"). **Independently reproduced** with the real CLI: `env -u JIRA_TOKEN -u JIRA_EMAIL jiramator import --dry-run` on example configs → both "Preview based on field_aliases only" and "Schema validation skipped" printed, preview rendered (markup summary `Risk [bold]A[/]` printed literally), exit 0 |
 
-**Score:** 4/4 roadmap success criteria verified (0 present-but-behavior-unverified)
+**Score:** 4/4 roadmap SCs verified (0 present-but-behavior-unverified).
 
-### Requirements Coverage
+### Plan must_haves truths (02-01 … 02-04)
 
-| Requirement | Source Plan | Description | Status | Evidence |
-|---|---|---|---|---|
-| PRE-01 | 02-01, 02-04 | Dry-run checks every row's payload against createmeta; lists missing required fields | ✓ SATISFIED | `run_preflight()`/`render_preflight_report()` in `import_preflight.py`; D-06/D-08/OQ-4 extensions in 02-04; full suite green (780 passed) |
-| PRE-02 | 02-01 | Same preview reports invalid select/option values and plain-text-for-ADF | ✓ SATISFIED | `find_payload_problems()` `invalid_option`/`adf` kinds; `TestPreflightProblems::test_select_adf_and_fix_version_problems_reported_together` passes |
-| PRE-03 | 02-02 (prerequisite), 02-03 (implementation) | Live import runs the same check before creating anything, reports all failing rows at once | ✓ SATISFIED | **Note:** REQUIREMENTS.md/02-02-SUMMARY marked PRE-03 "complete" at the 02-02 stub-prerequisite stage (per the task notes), which is misleading in isolation — 02-02 only prepared test fixtures and performed no live-abort wiring. The actual live-abort implementation lands in 02-03 (`importer.py` preflight-then-abort gate, `cli.py` exit/status handling) and is verified above (Truth #3) and by `TestImportPreflightLiveAbort`/`TestRunImportPreflightAbort`/`TestRunImportPreflightResume`/`TestStubCreatemetaThroughPreflight`, all passing. PRE-03 is genuinely satisfied as of 02-03, independent of the premature status mark |
-| PRE-04 | 02-01, 02-04 | Without credentials/Jira access, dry-run still previews and states validation was skipped | ✓ SATISFIED | Verified above (Truth #4); 02-04 adds the full degrade/exit-code matrix (`get_fields` failure, createmeta `ConnectionError`, `--preview-rows`, `--max-rows`, `--resume`) covered by `TestImportPreflightDryRun` (12+ tests, all passing) |
+All plan truths were checked against code and named passing tests. Highlights:
 
-No orphaned requirements: REQUIREMENTS.md phase-2 mapping (PRE-01..04) exactly matches the four plans' declared `requirements:` frontmatter.
+| Plan | Truth (abridged) | Status | Evidence |
+|---|---|---|---|
+| 02-01 | createmeta failure → `unavailable`, "Schema validation skipped", no ✓; get_fields failure alone degrades only the preview | ✓ | `run_preflight` except-block returns `unavailable`; `render_preflight_report` unavailable branch has no ✓; cli separates `get_fields` try. `TestPreflightAvailability::*`, `test_unavailable_says_skipped_without_check_mark` PASSED |
+| 02-01 | Unknown / missing issue type is a row problem (casefold match, one fetch per type) | ✓ | `by_casefold`, `schema_by_id` cache; `_NO_ISSUE_TYPE_PROBLEM` |
+| 02-01 | `plan` behaviour byte-identical; planner.py unchanged | ✓ | `git diff $(merge-base develop HEAD) HEAD -- jiramator/planner.py` empty; `find_payload_problems` defaults reproduce removed logic line-for-line; `test_field_not_on_screen_skipped`, `test_fix_versions_allowed_values_skipped` PASSED |
+| 02-01 | D-10 off-screen wording; D-09 escaped `[IssueType]`; ordering/adjacency/empty edges; Rich markup safety | ✓ | `_row_problem_messages`, `_row_header` (`escape(f'[{issue_type}]')`); `test_off_screen_field_reported_with_column_and_issue_type`, `test_identical_rows_reported_separately_in_row_order`, `test_empty_select_cell_is_only_subject_to_required_check`, `test_markup_in_summary_printed_literally` (both files) PASSED |
+| 02-01 | OQ-2 dry-run `--resume` parity | ✓ | dry-run passes `prior_report`; `_prior_created_keys` → `skip_template_keys`; `test_resume_dry_run_skips_rows_already_created` PASSED |
+| 02-01 | **Backstop:** option comparison exact code-point equality matches Jira | ⚠️ insufficient_spec | Code does use `value in names` (exact). Whether Jira agrees is unverifiable here → human item 5 |
+| 02-02 | Shared `PermissiveFieldMeta`/`stub_createmeta`; FakeJiraClient createmeta; `_FakeResult.preflight=None` | ✓ | `tests/conftest.py`; `TestStubCreatemeta::*` (6), `TestStubCreatemetaThroughPreflight::*` (2) PASSED |
+| 02-03 | Abort report: status failed, `error.type=="Aborted"`, one failed IssueResult per problem row, sanitized | ✓ | `_record` sanitizes via `sanitize_message`; `abort_info` sanitizes; `test_abort_error_redacts_token`, `test_mixed_sheet_records_only_failing_rows` PASSED |
+| 02-03 | Unavailable on live → loud warning, proceed | ✓ | cli L739-748; `TestImportPreflightLiveUnavailable::*` (3) PASSED |
+| 02-03 | Resume semantics; build-failed rows in abort; zero rows → no createmeta call; dedup rows still validated | ✓ | `TestRunImportPreflightResume::*` (7), `test_duplicate_summary_rows_get_separate_entries` PASSED |
+| 02-03 | Caveats in abort output, not on passing live runs | ✓ | `test_live_abort_prints_caveats`, `test_live_all_rows_pass_creates_without_caveat_output` PASSED |
+| 02-03 | Docs: README/CHANGELOG `[Unreleased]` Breaking/Added/AGENTS | ✓ | CHANGELOG L6-30; README L170, 334-365, 505-507 |
+| 02-03 | **Backstop:** live smoke against real Jira | → human item 1 | Not counted as a separate truth (identical to SC1 live replay) |
+| 02-04 | D-06 caveats, sub-task parent, deferred off-screen, OQ-4 coercion row errors, D-08 build-failed rows, exit-code matrix, `--preview-rows`/`--max-rows` | ✓ | `TestPreflightDeferred::*` (9 incl. WR-01 regression `test_non_string_deferred_cell_is_missing_required`), `TestRowBuildCoercionErrors::*` (3), `TestPreflightBuildFailures::*` (3), `TestImportPreflightDryRun::*` PASSED |
+
+### Prohibitions (flagged, judgment-tier — NON-AUTHORITATIVE verdicts)
+
+| ID | Statement (abridged) | LLM-judge verdict | Evidence |
+|---|---|---|---|
+| P-02-01 | Preflight never writes to Jira, never does user/issue/sprint lookups | HELD | `import_preflight.py` calls only `get_createmeta_issue_types` / `get_createmeta_fields`; tests assert create/dedup/user/sprint mocks not called (`test_import_preflight.py` L524-526, `test_import_cli.py` L690-693, L979-982) |
+| P-02-02 | Unreachable createmeta never presented as passed | HELD | `render_preflight_report` unavailable branch emits only the yellow "skipped" line; `test_unavailable_says_skipped_without_check_mark` |
+| P-02-03 | Test-harness changes must not weaken existing assertions | HELD | `git diff <merge-base> HEAD -- tests/` contains **zero** removed `assert` lines |
+| P-02-04 | No partial create / no `partial` status on problems | HELD | importer returns before dedup/create; cli sets `failed` before finalization |
+| P-02-05 | Caveat-only rows never counted as problems | HELD | `problem_rows` filters on `problems`; `test_caveat_only_rows_never_counted_as_problems` |
+
+Flagged for human confirmation (human item 6) — never silently absorbed.
 
 ### Required Artifacts
 
-| Artifact | Expected | Status | Details |
-|---|---|---|---|
-| `jiramator/import_preflight.py` | `PreflightRow`, `PreflightResult`, `run_preflight()`, `render_preflight_report()` | ✓ VERIFIED | 445 lines; all four symbols present and substantive (read in full); no stub markers |
-| `jiramator/payload_validator.py` | `PayloadProblem`, `find_payload_problems()`; plan-preserving `validate_ticket_payload` | ✓ VERIFIED | 273 lines; ADF/option/off-screen/missing-required kinds implemented; `git diff develop -- jiramator/planner.py` empty, confirming plan behaviour untouched |
-| `jiramator/importer.py` | live preflight hook + abort recording | ✓ VERIFIED | `run_preflight()` called at both dry-run and live call sites; abort path records per-row failures and `abort_info` |
-| `jiramator/cli.py` | live abort branch (exit 1, status failed) and unavailable warning | ✓ VERIFIED | Confirmed by direct read: abort sets `report.status = "failed"`, writes, prints, exits 1, before the generic success/partial/failed finalization block |
-| `tests/test_import_preflight.py` | unit tests incl. SC1 replay fixture and render tests | ✓ VERIFIED | 39 tests collected across TestPreflightProblems/TestPreflightDeferred/TestRowBuildCoercionErrors/TestPreflightBuildFailures etc., all passing |
-| `CHANGELOG.md` | `[Unreleased]` breaking-change entry | ✓ VERIFIED | `### Changed` **Breaking** entry documents dry-run exit 1 and live abort-before-create |
+| Artifact | Status | Details |
+|---|---|---|
+| `jiramator/import_preflight.py` | ✓ VERIFIED | 445 lines; `PreflightRow`, `PreflightResult`, `run_preflight`, `render_preflight_report`; imported by `importer.py` and `cli.py` |
+| `jiramator/payload_validator.py` | ✓ VERIFIED | `PayloadProblem`, `find_payload_problems`; `validate_ticket_payload` wraps it with plan-preserving defaults |
+| `jiramator/importer.py` | ✓ VERIFIED | preflight at both dry-run and live sites; abort recording; coercion row errors |
+| `jiramator/cli.py` | ✓ VERIFIED | dry-run exit 1 on problems; live abort branch; unavailable warning |
+| `tests/conftest.py`, `tests/test_cli_e2e.py`, `tests/test_cli.py` | ✓ VERIFIED | stub helpers wired into live tests |
+| `tests/test_import_preflight.py`, `tests/test_import_cli.py` | ✓ VERIFIED | substantive suites, all passing |
+| `CHANGELOG.md` | ✓ VERIFIED | `[Unreleased]` Breaking entry |
 
 ### Key Link Verification
 
-| From | To | Via | Status | Details |
+| From | To | Status | Details |
+|---|---|---|---|
+| `importer.run_import` (dry-run) | `run_preflight` | ✓ WIRED | called when `client is not None`, with `skip_template_keys` from prior report |
+| `importer.run_import` (live) | `run_preflight` | ✓ WIRED | after initial `_persist()` (L383), before `find_issue_keys_by_summaries` (L425) |
+| importer abort path | `run_report.abort_info` / `_record`→`sanitize_message` | ✓ WIRED | both sanitize |
+| `cli.import_command` | `render_preflight_report` / `ImportRunResult.preflight` | ✓ WIRED | `getattr(result, "preflight", None)` at both sites |
+| `run_preflight` | `jira_client` createmeta | ✓ WIRED | issue types once; fields once per distinct type id |
+| `run_preflight` | `find_payload_problems` | ✓ WIRED | `assume_present_field_ids=frozenset(deferred)`, off-screen + blank-ADF enabled |
+
+### Data-Flow Trace (Level 4)
+
+| Artifact | Data | Source | Real data | Status |
 |---|---|---|---|---|
-| `jiramator/importer.py::run_import` (live) | `jiramator/import_preflight.py::run_preflight` | called after initial `_persist()`, before `find_issue_keys_by_summaries` | ✓ WIRED | Confirmed by reading `importer.py` lines ~380-420: `_persist()` call precedes `preflight = run_preflight(...)`, which precedes `client.find_issue_keys_by_summaries(...)` |
-| `jiramator/importer.py` abort path | `jiramator/run_report.py::abort_info` / `_record`→`sanitize_message` | `report.error = abort_info(...)`; per-row `_record(tk, "failed", error=...)` | ✓ WIRED | Both present; `_record` sanitizes error text via `sanitize_message(kw["error"], secrets=secrets)` before appending |
-| `jiramator/cli.py::import_command` | `ImportRunResult.preflight` | `status == "problems"` → write report (status failed) → print → `sys.exit(1)` before finalization | ✓ WIRED | Confirmed; both dry-run and live call sites use `getattr(result, "preflight", None)` so hand-rolled test stubs never `AttributeError` |
-| `jiramator/import_preflight.py::run_preflight` | `jiramator/jira_client.py` | `get_createmeta_issue_types` once + `get_createmeta_fields` per distinct type id | ✓ WIRED | Confirmed: `schema_by_id` dict caches per `type_id`; `test_sc1_risk_sheet_reports_all_problems_exit_1` asserts `get_createmeta_issue_types.assert_called_once()` and `get_createmeta_fields.assert_called_once()` for a single-issue-type sheet |
+| preflight section (cli) | `PreflightResult.rows` | live `client.get_createmeta_*` over built row payloads | yes (no static fallback; failure → explicit `unavailable`) | ✓ FLOWING |
 
 ### Behavioral Spot-Checks
 
 | Behavior | Command | Result | Status |
 |---|---|---|---|
-| Full suite passes | `.venv/bin/python -m pytest -q` | 780 passed | ✓ PASS |
-| Lint clean | `.venv/bin/ruff check .` | All checks passed! | ✓ PASS |
-| `planner.py` byte-identical to develop | `git diff develop -- jiramator/planner.py` | empty | ✓ PASS |
-| WR-01 regression (deferred-field falsy-but-non-blank fix) | `pytest tests/test_import_preflight.py -k test_non_string_deferred_cell_is_missing_required` | 1 passed | ✓ PASS |
-| SC1 live-abort end-to-end (mocked) | `pytest tests/test_import_cli.py::TestImportPreflightLiveAbort tests/test_import_cli.py::TestImportPreflightLiveUnavailable` | 6 passed | ✓ PASS |
-| PRE-02 combined-problems test | `pytest tests/test_import_preflight.py -k test_select_adf_and_fix_version_problems_reported_together` | 1 passed, 38 deselected | ✓ PASS |
+| Full suite (run once) | `.venv/bin/python -m pytest -q -rA` | 780 passed | ✓ PASS |
+| Lint | `.venv/bin/ruff check .` | All checks passed | ✓ PASS |
+| planner.py unchanged vs merge-base | `git diff 88c9e5d HEAD -- jiramator/planner.py` | empty | ✓ PASS |
+| SC4 real CLI, no credentials | `env -u JIRA_TOKEN -u JIRA_EMAIL jiramator import --org-config configs/org.example/example.yaml --team-config configs/teams.example/example.yaml --dry-run s.csv` | both warnings, preview, exit 0 | ✓ PASS |
+| WR-01 fix present | `git show 80b02d3` | `_deferred_present` uses `isinstance(raw_value, str) and raw_value.strip()`; regression test passes | ✓ PASS |
 
 ### Probe Execution
 
-Not applicable — this phase has no `scripts/*/tests/probe-*.sh` style probes; the project's own pytest suite is the verification harness and was run directly above.
+Not applicable — no `scripts/*/tests/probe-*.sh` probes declared or present.
+
+### Requirements Coverage
+
+| Requirement | Source Plan(s) | Status | Evidence |
+|---|---|---|---|
+| PRE-01 | 02-01, 02-03, 02-04 | ✓ SATISFIED | SC1 + 02-04 truths |
+| PRE-02 | 02-01 | ✓ SATISFIED | SC2 |
+| PRE-03 | 02-02 (prereq), 02-03 | ✓ SATISFIED | SC3 |
+| PRE-04 | 02-01, 02-03, 02-04 | ✓ SATISFIED | SC4 (also reproduced via real CLI) |
+
+All four IDs in REQUIREMENTS.md mapped to Phase 2 are claimed by plans; no orphans.
 
 ### Anti-Patterns Found
 
-None. Scanned `jiramator/import_preflight.py`, `jiramator/payload_validator.py`, `jiramator/importer.py`, `jiramator/cli.py` for `TBD`/`FIXME`/`XXX`/`TODO`/`HACK`/`PLACEHOLDER`/"not yet implemented" — zero matches.
+| File | Line | Pattern | Severity | Impact |
+|---|---|---|---|---|
+| `jiramator/*` (4 phase files), `tests/conftest.py` | — | TBD/FIXME/XXX/TODO/HACK/PLACEHOLDER | — | none found |
+| `02-REVIEW-DISPOSITION.md` | WR-01 row | cites fix commit `b7b79ae`, which does not exist in this repo (actual: `80b02d3`) | ℹ️ Info | stale hash after rebase; doc-only |
+| branch vs `develop` | — | `develop` has advanced (Release v1.2.9, v1.3.0; `planner.py` +95 lines) since merge-base `88c9e5d` | ℹ️ Info | rebase/merge needed before ship; CHANGELOG `[Unreleased]` and the "v1.2.9 Hardening" milestone label now collide with the released v1.2.9 tag. Not a goal gap |
 
-### Code Review Disposition (02-REVIEW-DISPOSITION.md)
+### Code Review Disposition
 
-| ID | Severity | Disposition | Verified |
-|---|---|---|---|
-| WR-01 | warning | fixed (`b7b79ae`) | ✓ Confirmed — `_deferred_present` now shares the `isinstance(raw, str) and raw.strip()` predicate with `run_import`; regression test passes |
-| WR-02 | warning | skipped by design (D-08) | Accepted per CONTEXT — build-failed rows only join the report when validation itself runs; this is a documented, deliberate scope boundary, not a gap |
-| IN-01 | info | open | Non-blocking — intentional test-stub permissiveness, covered elsewhere |
-| IN-02 | info | open | Non-blocking — test-fixture duplication, deferred to Phase 4 hygiene |
+WR-01 fixed (`80b02d3`, verified); WR-02 skipped by design per D-08 (accepted — `test_unavailable_drops_build_failed_rows` pins the behaviour); IN-01/IN-02 open info, non-blocking.
 
 ### Human Verification Required
 
-The four items below require a live Jira instance, which is unavailable in this verification environment. All automated (mocked/stubbed) equivalents pass. Per the phase's own 02-03-SUMMARY and 02-04-SUMMARY, these were already flagged by the executor as deferred human verification, not skipped silently.
+1. **Live SC1 dry-run smoke** — real Jira, 2026-09-02 Risk sheet → 8 problems / 6 rows, exit 1, no writes. (UAT #1)
+2. **No-credential dry-run on the real org config** → "Schema validation skipped", exit 0. (UAT #2)
+3. **Live abort smoke** → nothing created, abort message, exit 1, report failed/Aborted. (UAT #3)
+4. **Live D-06 caveat** — required Reporter/Parent on a real create screen → caveat, exit 0. (UAT #4)
+5. **Backstop: exact option-value comparison** — confirm Jira rejects case/normalization variants of a select value, or accept the assumption.
+6. **Prohibitions P-02-01..05** — confirm the non-authoritative HELD verdicts above.
 
-1. **Live SC1 dry-run smoke test**
-   **Test:** Run `jiramator import --dry-run` against real Jira on the 2026-09-02-shaped Risk sheet.
-   **Expected:** Validation section lists missing Fix versions (all 6 rows) and Repositories (rows 2-3), `6 of 6 rows have problems`, exit 1, no writes.
-   **Why human:** No live Jira credentials/instance in this environment; this is the literal roadmap SC1 wording ("Replaying the 2026-09-02 Risk import shape").
-
-2. **Live dry-run with no credentials**
-   **Test:** Same sheet, `JIRA_TOKEN` unset.
-   **Expected:** "Schema validation skipped", exit 0.
-   **Why human:** Requires a real environment-credential toggle against live Jira.
-
-3. **Live abort smoke test**
-   **Test:** Run a live `jiramator import` (no `--dry-run`) against real Jira with problem rows present.
-   **Expected:** Aborts before any create call; prints every failing row and "Aborting — fix the rows above. No issues were created."; exits 1; report `status=="failed"`, `error.type=="Aborted"`.
-   **Why human:** No live Jira access; the mocked-client path (`TestImportPreflightLiveAbort`) is thoroughly green, but real Jira createmeta response shapes and real HTTP error types are unexercised here.
-
-4. **Live caveat smoke test (D-06)**
-   **Test:** `import --dry-run` against real Jira with a required Reporter/Parent field and a non-blank source cell.
-   **Expected:** Caveat printed under "Not preflight-validated:", exit 0.
-   **Why human:** No live Jira access; only mocked createmeta exercised in this environment.
+Items 1-4 are already persisted in `02-UAT.md` (all pending); items 5-6 are new in this regeneration (the prior report omitted the 02-01 backstop truth and the flagged prohibitions).
 
 ### Gaps Summary
 
-No functional gaps. All four roadmap success criteria and all four PRE-0X requirements are satisfied by code that is present, substantive, and wired, backed by a green 780-test suite and clean ruff. The one documentation inaccuracy found (PRE-03 marked "Complete" in REQUIREMENTS.md as of 02-02, before the live-abort implementation in 02-03 existed) does not affect the current state of the codebase — PRE-03 is now genuinely implemented and tested as of 02-03's commits, and REQUIREMENTS.md's current "Complete" marking is accurate at time of verification. Status is `human_needed` solely because the phase's core safety behavior (no live writes until validated; live abort) has not been exercised against a real Jira instance, which is outside this environment's capability and was already flagged as deferred by the executing agent.
+No functional gaps. Every roadmap SC and PRE-01..04 is backed by present, substantive, wired code and passing named tests (780 passed, ruff clean); SC4 was additionally reproduced through the real CLI. Status is `human_needed` because live-Jira behaviour (UAT 1-4), one backstop truth about Jira's option comparison, and five flagged judgment-tier prohibitions cannot be discharged automatically. Before shipping, the branch also needs to be reconciled with `develop`, which has moved on to v1.3.0.
 
 ---
 
-_Verified: 2026-10-15T18:10:00Z_
+_Verified: 2026-10-19T15:01:04Z_
 _Verifier: the agent (gsd-verifier)_

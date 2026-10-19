@@ -3,7 +3,7 @@ status: testing
 phase: 02-import-preflight-validation
 source: [02-VERIFICATION.md]
 started: 2026-10-15T18:15:00Z
-updated: 2026-10-15T18:15:00Z
+updated: 2026-10-19T15:05:00Z
 ---
 
 ## Current Test
@@ -34,12 +34,20 @@ result: [pending]
 expected: Caveat 'required <Name> (<id>) depends on live <kind> lookup — not preflight-validated' under 'Not preflight-validated:', exit 0
 result: [pending]
 
+### 5. Option-value comparison matches Jira's (backstop, 02-01)
+expected: Submitting a select value that differs only in case or NFC/NFD form against a real select field is rejected by Jira (so preflight's exact match is not a false positive) — or the assumption is consciously accepted
+result: [pending]
+
+### 6. Confirm prohibitions P-02-01..P-02-05 (see 02-VERIFICATION.md Prohibitions table)
+expected: Each LLM-judged HELD verdict confirmed or rejected by a human
+result: [pending]
+
 ## Summary
 
-total: 4
+total: 6
 passed: 0
 issues: 0
-pending: 4
+pending: 6
 skipped: 0
 blocked: 0
 
