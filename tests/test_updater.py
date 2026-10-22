@@ -58,6 +58,16 @@ def _org_config() -> OrgConfig:
 
 
 class TestBuildRowUpdatePayload:
+    def test_multiline_summary_is_joined(self):
+        row = {"Key": "CA-1", "summary": "Line one\r\n  line two\n"}
+        result = build_row_update_payload(
+            row, row_number=1, key_column="Key", org_config=_org_config()
+        )
+
+        assert result.success is True
+        assert result.payload is not None
+        assert result.payload["fields"]["summary"] == "Line one line two"
+
     def test_builds_update_payload_from_row(self):
         row = {
             "Key": "CA-4646",

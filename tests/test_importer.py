@@ -178,6 +178,27 @@ class TestBuildRowPayload:
         assert result.payload["fields"]["customfield_12747"] == {"value": "Calcs"}
         assert result.resolved_columns["Product Horizontals(Finance)"].resolution_source == "jira_exact"
 
+    def test_multiline_summary_is_joined_with_warning(self):
+        from jiramator.importer import build_row_payload
+
+        row = {"Summary": "New CTCs: \n* 341 for Nigerian Calcs\n\n* 719 Clone of CTC 702\n"}
+
+        result = build_row_payload(
+            row,
+            row_number=1,
+            org_config=_org_config(),
+            team_config=_team_config(),
+        )
+
+        assert result.success is True
+        expected = "New CTCs: * 341 for Nigerian Calcs * 719 Clone of CTC 702"
+        assert result.payload["fields"]["summary"] == expected
+        assert result.summary == expected
+        assert result.warnings == [
+            "Row 1: 'Summary' contained line breaks; joined into a single line "
+            "(Jira summaries cannot span lines)"
+        ]
+
     def test_missing_summary_is_a_row_error(self):
         from jiramator.importer import build_row_payload
 
