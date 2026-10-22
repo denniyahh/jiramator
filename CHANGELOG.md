@@ -5,6 +5,13 @@ All notable changes to Jiramator are documented here. This project adheres to
 
 ## [Unreleased]
 
+### Fixed
+- **Multi-line summaries no longer fail `import`/`update`.** Jira rejects a
+  summary containing newlines, so spreadsheet cells with line breaks failed
+  with "The summary is invalid because it contains newline characters."
+  Summary lines are now joined with single spaces (blank lines dropped), and
+  the `import` preview warns when a row's summary was joined.
+
 ## [1.3.0] — 2026-10-16
 
 ### Changed

@@ -20,7 +20,7 @@ from jiramator.run_report import (
     sanitize_message,
     write_report_atomic,
 )
-from jiramator.value_coercion import coerce_field_value, should_omit_value
+from jiramator.value_coercion import coerce_field_value, should_omit_value, to_single_line
 
 # Matches a Jira issue key like "CA-5079" — used to tell a Parent column
 # value that's already a key apart from one that's an issue summary needing
@@ -163,7 +163,14 @@ def build_row_payload(
             continue
 
         if resolved.jira_field in _DIRECT_FIELDS:
-            fields[resolved.jira_field] = str(raw_value).strip()
+            text = str(raw_value).strip()
+            single_line = to_single_line(text)
+            if len(text.splitlines()) > 1:
+                warnings.append(
+                    f"Row {row_number}: '{source_header}' contained line breaks; "
+                    "joined into a single line (Jira summaries cannot span lines)"
+                )
+            fields[resolved.jira_field] = single_line
         else:
             fields[resolved.jira_field] = coerced
 

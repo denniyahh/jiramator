@@ -26,6 +26,11 @@ def bulk_create_config() -> BulkCreateConfig:
 
 
 class TestCoerceFieldValue:
+    def test_summary_is_coerced_to_single_line(self, bulk_create_config: BulkCreateConfig):
+        from jiramator.value_coercion import coerce_field_value
+
+        assert coerce_field_value("summary", "  a\n\n b \r\nc  ", bulk_create_config) == "a b c"
+
     def test_name_object(self, bulk_create_config: BulkCreateConfig):
         from jiramator.value_coercion import coerce_field_value
 
