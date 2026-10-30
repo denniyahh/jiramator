@@ -174,7 +174,7 @@ team_name: {team_name}
 # board_id: 123
 
 # Whether this PI's sprints already exist in Jira. Set false to skip the
-# board lookup, or omit to be asked each run.
+# board lookup, or omit to auto-detect them on the board each run.
 sprints_exist: false
 
 # ---------------------------------------------------------------------------

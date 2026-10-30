@@ -16,7 +16,17 @@ _BUILTIN_FIELD_TYPES = {
     # Format (ADF), not a plain string — a bare string is rejected with
     # "The field value is not valid Atlassian Document Format (ADF) content."
     "description": "adf_text",
+    # Jira rejects a summary containing line breaks ("The summary is invalid
+    # because it contains newline characters."), which multi-line spreadsheet
+    # cells routinely produce.
+    "summary": "single_line",
 }
+
+
+def to_single_line(value: Any) -> str:
+    """Join a possibly multi-line value into one line, dropping blank lines."""
+    lines = (line.strip() for line in str(value).splitlines())
+    return " ".join(line for line in lines if line)
 
 
 def split_multi_value(value: Any, config: BulkCreateConfig) -> list[str]:
@@ -89,6 +99,9 @@ def coerce_field_value(field_name: str, raw_value: Any, config: BulkCreateConfig
         values = split_multi_value(raw_value, config)
         values = [_resolve_value_alias(field_name, item, config) for item in values]
         return [{"value": item} for item in values]
+
+    if field_type == "single_line":
+        return to_single_line(raw_value)
 
     if field_type == "adf_text":
         return _adf_paragraph(str(raw_value).strip())

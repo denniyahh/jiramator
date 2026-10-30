@@ -536,8 +536,9 @@ class TeamConfig(BaseModel):
         default=None,
         description=(
             "Whether sprints for the PI already exist in Jira at `plan` time. "
-            "Tri-state: `None` (default) means 'ask interactively when running on a "
-            "TTY, error on non-TTY'; `True` means resolve sprints; `False` means "
+            "Tri-state: `None` (default) means 'check the board for this PI's "
+            "sprints, falling back to asking interactively on a TTY (error on "
+            "non-TTY) if the board can't be checked'; `True` means resolve sprints; `False` means "
             "skip sprint resolution entirely (no Jira board API call). The CLI flag "
             "`--sprints-exist / --no-sprints-exist` overrides this field at runtime. "
             "When set to `False`, no Jira sprint API call is made even if `board_id` "

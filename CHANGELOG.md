@@ -5,6 +5,20 @@ All notable changes to Jiramator are documented here. This project adheres to
 
 ## [Unreleased]
 
+### Added
+- **Import preflight validation (PRE-01..PRE-04).** `import` checks every row
+  against Jira's live createmeta for its issue type before anything is
+  created, and lists every problem in one pass: missing required fields
+  (naming the column that would supply them), rejected option values
+  including fix versions that don't exist (`import` never creates
+  versions), plain text where ADF is required, columns mapped to fields that
+  aren't on the create screen, and rows that couldn't be built. Required
+  Reporter/Assignee/Parent/Sprint values depend on a live lookup and are
+  shown as "not preflight-validated" caveats instead of problems. A value
+  that can't be coerced (e.g. text in a number column) is now that row's
+  error instead of aborting the whole preview. `import --dry-run --resume`
+  validates exactly the rows a live resume would attempt.
+
 ### Changed
 - **Breaking: `import --dry-run` exits 1 on problems, and a live `import`
   aborts before creating anything.** (a) `import --dry-run` now exits 1 when
@@ -21,19 +35,35 @@ All notable changes to Jiramator are documented here. This project adheres to
   create metadata can't be fetched, a live run warns loudly that problems
   may surface as Jira 400 errors and proceeds as before.
 
+### Fixed
+- **Multi-line summaries no longer fail `import`/`update`.** Jira rejects a
+  summary containing newlines, so spreadsheet cells with line breaks failed
+  with "The summary is invalid because it contains newline characters."
+  Summary lines are now joined with single spaces (blank lines dropped), and
+  the `import` preview warns when a row's summary was joined.
+
+## [1.3.0] — 2026-10-16
+
+### Changed
+- **`plan` detects existing sprints instead of asking.** When neither
+  `--sprints-exist`/`--no-sprints-exist` nor `sprints_exist:` in the team
+  config is set, `plan` now checks the team's board (read-only) for any of
+  this PI's sprints named by `sprint_name_template`, and assigns sprints only
+  if they're there. If the board can't be checked (no credentials, Jira
+  unreachable, no `sprint_name_template`), it falls back to the previous
+  behavior: ask on a TTY, error otherwise. The flag and config key still win.
+
+### Fixed
+- **Long-sprint tickets are now placed in a sprint.** With sprints existing,
+  `plan` matched the per-sprint "6a"/"6b" tickets against sprint names like
+  `…Sprint6a…`, which boards with a single Sprint 6 don't have, so those
+  tickets were created without a sprint. Suffixed labels now fall back to the
+  base sprint (`6`) when no dedicated suffixed sprint exists; boards that do
+  have separate 6a/6b sprints still use them.
+
+## [1.2.9] — 2026-10-16
+
 ### Added
-- **Import preflight validation (PRE-01..PRE-04).** `import` checks every row
-  against Jira's live createmeta for its issue type before anything is
-  created, and lists every problem in one pass: missing required fields
-  (naming the column that would supply them), rejected option values
-  including fix versions that don't exist (`import` never creates
-  versions), plain text where ADF is required, columns mapped to fields that
-  aren't on the create screen, and rows that couldn't be built. Required
-  Reporter/Assignee/Parent/Sprint values depend on a live lookup and are
-  shown as "not preflight-validated" caveats instead of problems. A value
-  that can't be coerced (e.g. text in a number column) is now that row's
-  error instead of aborting the whole preview. `import --dry-run --resume`
-  validates exactly the rows a live resume would attempt.
 - **Ruff linting.** `ruff` is now a dev dependency, configured in `pyproject.toml`
   (`E`, `F`, `W`, `I`, `UP`, `B`), and enforced by a new `lint` job in CI. Existing
   findings were fixed: import order, unused imports, `datetime.UTC`, explicit
@@ -291,6 +321,8 @@ Initial release.
 - CSV encoding auto-detection with `--encoding` override.
 - Preview-first safety model: `--dry-run` on every command.
 
+[1.3.0]: https://github.com/denniyahh/jiramator/releases/tag/v1.3.0
+[1.2.9]: https://github.com/denniyahh/jiramator/releases/tag/v1.2.9
 [1.2.8]: https://github.com/denniyahh/jiramator/releases/tag/v1.2.8
 [1.2.7]: https://github.com/denniyahh/jiramator/releases/tag/v1.2.7
 [1.2.6]: https://github.com/denniyahh/jiramator/releases/tag/v1.2.6
