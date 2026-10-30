@@ -5,16 +5,15 @@ All HTTP calls are mocked — no real Jira API traffic.
 
 from __future__ import annotations
 
-import json
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
+import certifi
 import pytest
 import requests
 
 from jiramator.config import OrgConfig
-from jiramator.jira_client import JiraApiError, JiraClient, _BULK_BATCH_SIZE
-
+from jiramator.jira_client import JiraApiError, JiraClient
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -129,10 +128,12 @@ class TestBuildHttpsAdapter:
     def test_ca_bundle_env_var_loads_custom_bundle(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
     ) -> None:
-        # Use the system CA bundle as a stand-in for a custom one — just
-        # verifying the path is actually threaded into the SSLContext.
+        # Use certifi's bundle as a stand-in for a custom one — just
+        # verifying the path is actually threaded into the SSLContext. This
+        # needs to be a real, existing bundle on every OS CI runs on
+        # (certifi.where() works on Linux/macOS/Windows alike).
         monkeypatch.delenv("JIRAMATOR_RELAX_TLS_STRICT", raising=False)
-        monkeypatch.setenv("JIRAMATOR_CA_BUNDLE", "/etc/ssl/certs/ca-certificates.crt")
+        monkeypatch.setenv("JIRAMATOR_CA_BUNDLE", certifi.where())
 
         from jiramator.jira_client import _build_https_adapter
 
@@ -263,7 +264,10 @@ class TestCreateIssuesBulk:
 
         # Verify batch sizes in the request bodies
         calls = client._session.post.call_args_list
-        body = lambda i: calls[i].kwargs.get("json") or calls[i][1].get("json")
+
+        def body(i: int) -> dict:
+            return calls[i].kwargs.get("json") or calls[i][1].get("json")
+
         assert len(body(0)["issueUpdates"]) == 3
         assert len(body(1)["issueUpdates"]) == 3
         assert len(body(2)["issueUpdates"]) == 1

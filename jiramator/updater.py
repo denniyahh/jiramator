@@ -25,7 +25,6 @@ from jiramator.field_resolver import ResolvedField, build_and_coerce_field_value
 from jiramator.jira_client import JiraApiError, JiraClient
 from jiramator.value_coercion import should_omit_value
 
-
 # ---------------------------------------------------------------------------
 # Result types
 # ---------------------------------------------------------------------------

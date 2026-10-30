@@ -9,18 +9,17 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import click
 import requests
 from rich.console import Console
 
-from jiramator.config import load_org_config, load_team_config
+from jiramator.config import OrgConfig, load_org_config, load_team_config
 from jiramator.config_merge import merge_configs
 from jiramator.error_format import ConfigValidationError
 from jiramator.importer import (
-    build_preview_report,
     render_import_execution_report,
     render_preview_report,
     run_import,
@@ -32,8 +31,11 @@ from jiramator.run_report import (
     IssueResult,
     RunReport,
     compute_resolved_hash,
+    credential_secrets,
     default_report_path,
+    error_info,
     find_resumable,
+    sanitize_message,
     write_report_atomic,
 )
 from jiramator.spreadsheet import read_spreadsheet
@@ -109,6 +111,24 @@ def _fail(message: str) -> None:
     sys.exit(1)
 
 
+def _record_import_failure(
+    report: RunReport, report_path: Path, exc: BaseException, org_config: OrgConfig,
+) -> None:
+    """Set ``ended_at``/``error`` (if unset) on an import report and persist it.
+
+    Write failures (``OSError``) are swallowed so the original exception is
+    what the user sees. ``exc`` is only read, never mutated.
+    """
+    if report.ended_at is None:
+        report.ended_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    if report.error is None:
+        report.error = error_info(exc, secrets=credential_secrets(org_config))
+    try:
+        write_report_atomic(report, report_path)
+    except OSError:
+        pass
+
+
 def _load_report_file(path: Path) -> RunReport:
     """Load and validate a run-report envelope from *path*.
 
@@ -161,8 +181,13 @@ def _update_report_from_result(
     ended_at: str,
     spreadsheet_path: Path,
     org_config_path: Path,
+    secrets: tuple[str, ...] = (),
 ) -> RunReport:
-    """Build a persistent run report for a bulk-update result."""
+    """Build a persistent run report for a bulk-update result.
+
+    Every per-row ``error`` string is passed through ``sanitize_message`` so
+    the update report gets the same redaction + cap as ``plan``/``import``.
+    """
     updated_fields_by_row: dict[int, list[str]] = {}
     for row_result in result.preview.row_results:
         if row_result.payload is None:
@@ -206,7 +231,7 @@ def _update_report_from_result(
                 kind="updated",
                 status="skipped",
                 jira_key=issue_key or None,
-                error=reason,
+                error=sanitize_message(reason, secrets=secrets),
                 fields=updated_fields_by_row.get(row_number, []),
             )
         )
@@ -217,7 +242,7 @@ def _update_report_from_result(
                 kind="updated",
                 status="failed",
                 jira_key=issue_key or None,
-                error=error,
+                error=sanitize_message(error, secrets=secrets),
                 fields=updated_fields_by_row.get(row_number, []),
             )
         )
@@ -325,7 +350,8 @@ def init(org_config_dir: Path, team_config_dir: Path, force: bool) -> None:
     help=(
         "Whether sprints for this PI already exist in Jira. "
         "If unset, falls back to 'sprints_exist:' in the team config, "
-        "then to an interactive prompt (or errors if stdin is not a TTY). "
+        "then checks the board for this PI's sprints, then to an "
+        "interactive prompt (or errors if stdin is not a TTY). "
         "Use --no-sprints-exist for sprintless runs (no Jira board API call)."
     ),
 )
@@ -637,7 +663,7 @@ def import_command(
     # Build a report for live runs (cli owns the lifecycle for import).
     report = RunReport(
         command=list(sys.argv),
-        started_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        started_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         team_config_path=str(team_config_path.resolve()),
         org_config_path=str(resolved_org_path.resolve()),
         team_name=team_config.team_name,
@@ -661,16 +687,20 @@ def import_command(
             prior_report=prior_report,
         )
     except (ValueError, JiraApiError) as exc:
-        # Persist the (possibly partial) report before exiting.
-        report.ended_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-        try:
-            write_report_atomic(report, report_path)
-        except OSError:
-            pass
+        # Persist the (possibly partial) report, with when/why it ended, before
+        # exiting. An error already recorded by run_import is kept.
+        _record_import_failure(report, report_path, exc, org_config)
         _fail(f"Import error: {exc}")
+    except BaseException as exc:
+        # Any other crash (e.g. a requests ConnectionError from get_fields, or
+        # Ctrl-C before run_import starts) still leaves a report with ended_at
+        # and error (INV-04), then propagates unchanged. A SystemExit raised by
+        # _fail in the clause above is not routed here.
+        _record_import_failure(report, report_path, exc, org_config)
+        raise
 
     # Finalize report status.
-    report.ended_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    report.ended_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
     failed_count = report.counts.get("failed", 0)
     created_count = report.counts.get("created", 0)
     skipped_count = report.counts.get("skipped", 0)
@@ -816,7 +846,7 @@ def update_command(
         console.print(render_update_preview_report(result.preview, preview_rows=preview_rows))
         return
 
-    started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    started_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
     try:
         client = JiraClient(org_config)
         jira_fields = client.get_fields()
@@ -830,7 +860,7 @@ def update_command(
     except (ValueError, JiraApiError) as exc:
         _fail(f"Update error: {exc}")
 
-    ended_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    ended_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
     report = _update_report_from_result(
         result,
         command=list(sys.argv),
@@ -838,6 +868,7 @@ def update_command(
         ended_at=ended_at,
         spreadsheet_path=spreadsheet_path,
         org_config_path=resolved_org_path,
+        secrets=credential_secrets(org_config),
     )
     write_report_atomic(report, report_path)
 

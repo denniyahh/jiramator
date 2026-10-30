@@ -3,6 +3,68 @@
 All notable changes to Jiramator are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- **Multi-line summaries no longer fail `import`/`update`.** Jira rejects a
+  summary containing newlines, so spreadsheet cells with line breaks failed
+  with "The summary is invalid because it contains newline characters."
+  Summary lines are now joined with single spaces (blank lines dropped), and
+  the `import` preview warns when a row's summary was joined.
+
+## [1.3.0] — 2026-10-16
+
+### Changed
+- **`plan` detects existing sprints instead of asking.** When neither
+  `--sprints-exist`/`--no-sprints-exist` nor `sprints_exist:` in the team
+  config is set, `plan` now checks the team's board (read-only) for any of
+  this PI's sprints named by `sprint_name_template`, and assigns sprints only
+  if they're there. If the board can't be checked (no credentials, Jira
+  unreachable, no `sprint_name_template`), it falls back to the previous
+  behavior: ask on a TTY, error otherwise. The flag and config key still win.
+
+### Fixed
+- **Long-sprint tickets are now placed in a sprint.** With sprints existing,
+  `plan` matched the per-sprint "6a"/"6b" tickets against sprint names like
+  `…Sprint6a…`, which boards with a single Sprint 6 don't have, so those
+  tickets were created without a sprint. Suffixed labels now fall back to the
+  base sprint (`6`) when no dedicated suffixed sprint exists; boards that do
+  have separate 6a/6b sprints still use them.
+
+## [1.2.9] — 2026-10-16
+
+### Added
+- **Ruff linting.** `ruff` is now a dev dependency, configured in `pyproject.toml`
+  (`E`, `F`, `W`, `I`, `UP`, `B`), and enforced by a new `lint` job in CI. Existing
+  findings were fixed: import order, unused imports, `datetime.UTC`, explicit
+  `raise ... from None`, and specific exception types in tests instead of bare
+  `pytest.raises(Exception)`.
+- **Run reports record why a run stopped.** When `plan` or `import` exits on an
+  exception or a deliberate abort, the run report now records `ended_at` and an
+  `error` object (`type`, `message`) before the error propagates. Secrets are
+  redacted from that message and from the per-issue `error` strings in the
+  same `plan`/`import` report, and from the per-row `error` strings in the
+  `update` report. The configured Jira token, its Basic-auth
+  `base64(email:token)` form, and any `Basic`/`Bearer` credential (scheme in
+  any case, followed by whitespace, `:` or `=`) become `***`. The TLS
+  diagnostic "Basic Constraints of CA cert not marked critical" is left
+  intact. Each recorded message is capped at 2,000 characters. Deliberate
+  aborts (declining a confirmation, a credential error, field-validation
+  problems, declining fix-version creation) use type `Aborted` with a readable
+  reason; declining the final ticket-creation confirmation records "User
+  declined ticket creation at the final confirmation." Exit codes are
+  unchanged. Console output is unchanged except that declining fix-version
+  creation now names the declined versions ("Aborted. Cannot proceed without
+  fix versions (declined creating: …)."). Older reports
+  still load and `--resume` still works; reports from clean runs carry no
+  `error` key. Caveat: a report written by 1.2.9 or later for a crashed or
+  aborted run contains `error` and cannot be resumed by 1.2.8 or earlier.
+
+### Fixed
+- Four `import` CLI tests patched `jiramator.cli.build_preview_report`, a symbol
+  `cli.py` never called, so the patch was a no-op. They now patch
+  `jiramator.importer.build_preview_report`, where it is actually used.
+
 ## [1.2.8] — 2026-07-17
 
 ### Changed
@@ -229,6 +291,8 @@ Initial release.
 - CSV encoding auto-detection with `--encoding` override.
 - Preview-first safety model: `--dry-run` on every command.
 
+[1.3.0]: https://github.com/denniyahh/jiramator/releases/tag/v1.3.0
+[1.2.9]: https://github.com/denniyahh/jiramator/releases/tag/v1.2.9
 [1.2.8]: https://github.com/denniyahh/jiramator/releases/tag/v1.2.8
 [1.2.7]: https://github.com/denniyahh/jiramator/releases/tag/v1.2.7
 [1.2.6]: https://github.com/denniyahh/jiramator/releases/tag/v1.2.6

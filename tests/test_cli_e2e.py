@@ -22,9 +22,6 @@ import pytest
 from click.testing import CliRunner
 
 from jiramator.cli import cli
-from jiramator.jira_client import JiraApiError
-from jiramator.run_report import RunReport
-
 
 # ---------------------------------------------------------------------------
 # Shared FakeJiraClient (mirrors tests/test_planner_report.py's double)

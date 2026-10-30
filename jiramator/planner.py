@@ -25,14 +25,16 @@ the (unvalidated) preview rather than failing.
 """
 from __future__ import annotations
 
+import re
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import requests
 from rich.console import Console
+from rich.markup import escape
 from rich.prompt import Confirm, IntPrompt, Prompt
 from rich.table import Table
 
@@ -44,13 +46,20 @@ from jiramator.run_report import (
     ConfigDriftError,
     IssueResult,
     RunReport,
+    abort_info,
     compute_resolved_hash,
+    credential_secrets,
+    error_info,
+    sanitize_message,
     write_report_atomic,
 )
 from jiramator.ticket_builder import _strip_template_key, build_all
 
 # Default sprint field ID in Jira (overridable via org_config.custom_fields["sprint_field"])
 _DEFAULT_SPRINT_FIELD = "customfield_10021"
+
+# Suffixed long-sprint label ("6a") → base sprint number group ("6")
+_LONG_SPRINT_LABEL_RE = re.compile(r"(\d+)[A-Za-z]+")
 
 
 # ---------------------------------------------------------------------------
@@ -205,30 +214,92 @@ def _prompt_sprints_exist(console: Console) -> bool:
     )
 
 
+def _detect_sprints_exist(
+    org_config: OrgConfig,
+    team_config: TeamConfig,
+    pi_num: str,
+    console: Console,
+) -> bool | None:
+    """Check the team's board for this PI's sprints (read-only).
+
+    Renders ``sprint_name_template`` for sprints ``1..org_config.sprints.count``
+    and looks for any of those names among the board's active/future sprints.
+
+    Args:
+        org_config: Organization config (credentials, sprint count).
+        team_config: Team config with ``board_id`` and ``sprint_name_template``.
+        pi_num: The PI number (e.g. "27.1").
+        console: Rich console for output.
+
+    Returns:
+        True if at least one of the PI's sprints exists, False if none do,
+        or None if detection could not run (no template, no credentials,
+        or Jira unreachable).
+    """
+    template = team_config.sprint_name_template
+    if team_config.board_id is None or not template:
+        return None
+    try:
+        client = JiraClient(org_config)
+        sprints = client.get_board_sprints(team_config.board_id)
+    except ValueError:
+        return None
+    except (JiraApiError, requests.RequestException) as exc:
+        console.print(f"  [yellow]⚠ Could not check board for sprints:[/] {exc}")
+        return None
+
+    board_names = {s["name"] for s in sprints}
+    expected = [
+        template.format(pi_num=pi_num, sprint_num=n)
+        for n in range(1, org_config.sprints.count + 1)
+    ]
+    found = [name for name in expected if name in board_names]
+    if found:
+        console.print(
+            f"  [green]✓[/] Found {len(found)} of {len(expected)} sprints for "
+            f"PI {pi_num} on board {team_config.board_id}."
+        )
+        return True
+    console.print(
+        f"  No sprints for PI {pi_num} found on board {team_config.board_id} "
+        f"(looked for e.g. [cyan]{escape(expected[0])}[/])."
+    )
+    return False
+
+
 def _resolve_sprints_exist_mode(
     team_config: TeamConfig,
     cli_override: bool | None,
     console: Console,
+    *,
+    org_config: OrgConfig | None = None,
+    pi_num: str | None = None,
 ) -> bool:
     """Resolve whether sprints exist for the current run (Plan 02-03).
 
-    Priority order (DC-6 — exactly one branch runs per call):
+    Priority order (DC-6 — the first branch that yields a value wins):
       1. CLI flag (--sprints-exist / --no-sprints-exist) → cli_override
       2. team_config.sprints_exist (config field)
-      3. Interactive prompt iff sys.stdin.isatty()
-      4. ConfigValidationError otherwise (non-TTY, no flag, no config)
+      3. Auto-detect on the board (needs ``org_config`` + ``pi_num``,
+         ``sprint_name_template`` and Jira credentials)
+      4. Interactive prompt iff sys.stdin.isatty()
+      5. ConfigValidationError otherwise (non-TTY, nothing else decided)
 
     Returns:
         True if sprints should be resolved, False to skip resolution.
 
     Raises:
-        ConfigValidationError: branch (4) — non-TTY with neither flag nor
-            config providing a value.
+        ConfigValidationError: branch (5) — non-TTY with neither flag, config
+            nor board detection providing a value.
     """
     if cli_override is not None:
         return cli_override
     if team_config.sprints_exist is not None:
         return team_config.sprints_exist
+    if org_config is not None and pi_num is not None:
+        detected = _detect_sprints_exist(org_config, team_config, pi_num, console)
+        if detected is not None:
+            return detected
     if sys.stdin.isatty():
         return _prompt_sprints_exist(console)
     raise ConfigValidationError(
@@ -236,9 +307,9 @@ def _resolve_sprints_exist_mode(
         line=None,
         field_path="sprints_exist",
         reason=(
-            "Cannot determine whether sprints exist: stdin is not a TTY "
-            "and neither --sprints-exist/--no-sprints-exist nor "
-            "'sprints_exist:' in team config is set."
+            "Cannot determine whether sprints exist: stdin is not a TTY, "
+            "neither --sprints-exist/--no-sprints-exist nor 'sprints_exist:' "
+            "in team config is set, and the board could not be checked."
         ),
     )
 
@@ -284,11 +355,15 @@ def _check_and_create_fix_versions(
     console: Console,
     *,
     assume_yes: bool = False,
+    report: RunReport | None = None,
+    secrets: tuple[str, ...] = (),
 ) -> None:
     """Check existing fix versions and create any that are missing.
 
     Prompts the user for confirmation before creating, unless ``assume_yes``
-    is set (non-interactive callers).
+    is set (non-interactive callers). When ``report`` is given, a decline
+    records the abort reason in ``report.error`` before exiting — the same
+    text printed after "Aborted." — with ``secrets`` redacted.
 
     Raises:
         SystemExit: If the user declines to create missing versions.
@@ -310,7 +385,14 @@ def _check_and_create_fix_versions(
     if not assume_yes and not Confirm.ask(
         "Create these fix versions?", default=False, console=console
     ):
-        console.print("[red]Aborted.[/] Cannot proceed without fix versions.")
+        # One reason string for both console and report (INV-04).
+        reason = (
+            "Cannot proceed without fix versions (declined creating: "
+            + ", ".join(missing) + ")."
+        )
+        console.print(f"[red]Aborted.[/] {escape(reason)}")
+        if report is not None:
+            report.error = abort_info(reason, secrets=secrets)
         sys.exit(1)
 
     for name in missing:
@@ -467,6 +549,8 @@ def _preflight_validate(
     console: Console,
     *,
     persist,
+    report: RunReport | None = None,
+    secrets: tuple[str, ...] = (),
 ) -> None:
     """Best-effort field validation gate, shared by dry-run and live-run.
 
@@ -475,7 +559,8 @@ def _preflight_validate(
     a warning is printed and the caller proceeds as if nothing were checked.
     Real field problems (missing required fields, ADF mismatches, invalid
     select values) are a hard stop in both modes: they're printed and the
-    process exits(1) before anything is created.
+    process exits(1) before anything is created; when ``report`` is given
+    the abort reason is recorded in ``report.error`` before persisting.
     """
     console.print("\n[bold]Validating ticket fields against Jira...[/]")
     try:
@@ -498,6 +583,14 @@ def _preflight_validate(
         "\n[red bold]Aborting[/] — fix the issues above before creating tickets. "
         "No tickets were created."
     )
+    if report is not None:
+        # Keep the problem list: the report alone must say which fields were
+        # wrong (INV-04). abort_info's cap bounds the size.
+        report.error = abort_info(
+            f"Found {len(problems)} field problem(s): " + "; ".join(problems)
+            + ". No tickets were created.",
+            secrets=secrets,
+        )
     persist()
     sys.exit(1)
 
@@ -521,6 +614,8 @@ def _resolve_sprint_ids(
     sprint_name_template, and injects the sprint custom field into each payload.
     The sprint field ID is read from ``org_config.custom_fields["sprint_field"]``,
     falling back to ``customfield_10021`` if not configured.
+    Long-sprint labels (``"6a"``, ``"6b"``) resolve to a matching suffixed
+    sprint if the board has one, otherwise to the base sprint (``"6"``).
     Mutates payloads in place. Strips ``_sprint_num`` after resolution.
 
     Args:
@@ -547,14 +642,22 @@ def _resolve_sprint_ids(
     sprint_num_to_id: dict[str, int] = {}
     unresolved: list[str] = []
     for num in sorted(needed_nums):
-        expected_name = team_config.sprint_name_template.format(
-            pi_num=pi_num, sprint_num=num,
-        )
-        if expected_name in sprint_name_to_id:
-            sprint_num_to_id[num] = sprint_name_to_id[expected_name]
-            console.print(
-                f"  [green]✓[/] Sprint {num} → [cyan]{expected_name}[/] (id={sprint_num_to_id[num]})"
+        # Long-sprint labels ("6a", "6b") prefer a dedicated suffixed sprint,
+        # then fall back to the base sprint ("6") when the board has only one.
+        candidates = [num]
+        base_match = _LONG_SPRINT_LABEL_RE.fullmatch(num)
+        if base_match:
+            candidates.append(base_match.group(1))
+        for candidate in candidates:
+            expected_name = team_config.sprint_name_template.format(
+                pi_num=pi_num, sprint_num=candidate,
             )
+            if expected_name in sprint_name_to_id:
+                sprint_num_to_id[num] = sprint_name_to_id[expected_name]
+                console.print(
+                    f"  [green]✓[/] Sprint {num} → [cyan]{expected_name}[/] (id={sprint_num_to_id[num]})"
+                )
+                break
         else:
             unresolved.append(num)
 
@@ -745,7 +848,7 @@ def run_plan(
     # -- Step 3: Initialize and persist the run report ---------------------
     report = RunReport(
         command=list(command) if command else [],
-        started_at=datetime.now(timezone.utc).isoformat(),
+        started_at=datetime.now(UTC).isoformat(),
         team_config_path=str(team_config_path.resolve()) if team_config_path else "",
         org_config_path=str(org_config_path.resolve()) if org_config_path else "",
         team_name=team_config.team_name,
@@ -787,11 +890,21 @@ def run_plan(
             sprints_exist_override=sprints_exist_override,
             assume_yes=assume_yes,
         )
-    except BaseException:
+    except BaseException as exc:
         # Persist whatever state we got to before the exception (covers
-        # JiraApiError, KeyboardInterrupt, anything else). The atomic-write
+        # JiraApiError, KeyboardInterrupt, anything else), recording when the
+        # run ended and why (INV-04). An ``error`` already set by a deliberate
+        # abort site (reason before SystemExit) is kept, not overwritten. The
+        # exception is only read, then re-raised unchanged. The atomic-write
         # contract from Plan 03 guarantees no half-written JSON on disk.
-        _persist()
+        if report.ended_at is None:
+            report.ended_at = datetime.now(UTC).isoformat()
+        if report.error is None:
+            report.error = error_info(exc, secrets=credential_secrets(org_config))
+        try:
+            _persist()
+        except OSError:
+            pass  # never mask/replace the original exception (P-01-01)
         raise
 
 
@@ -815,7 +928,8 @@ def _run_plan_inner(
     sprints_exist: bool = False
     if team_config.board_id is not None:
         sprints_exist = _resolve_sprints_exist_mode(
-            team_config, sprints_exist_override, console
+            team_config, sprints_exist_override, console,
+            org_config=org_config, pi_num=pi_num,
         )
         if sprints_exist:
             console.print(
@@ -860,24 +974,28 @@ def _run_plan_inner(
         if validation_client is not None:
             _preflight_validate(
                 validation_client, team_config.project_key, all_payloads,
-                console, persist=persist,
+                console, persist=persist, report=report,
+                secrets=credential_secrets(org_config),
             )
 
         console.print("\n[yellow]── Dry run ── no tickets created.[/]")
         report.status = "success"
-        report.ended_at = datetime.now(timezone.utc).isoformat()
+        report.ended_at = datetime.now(UTC).isoformat()
         persist()
         return
 
     # -- Step 7: Resolve credentials and build client -----------------------
+    secrets = credential_secrets(org_config)
     try:
         client = JiraClient(org_config)
     except ValueError as exc:
         console.print(f"\n[red bold]Credential error:[/] {exc}")
+        report.error = abort_info(f"Credential error: {exc}", secrets=secrets)
         sys.exit(1)
 
     _preflight_validate(
-        client, team_config.project_key, all_payloads, console, persist=persist,
+        client, team_config.project_key, all_payloads, console,
+        persist=persist, report=report, secrets=secrets,
     )
 
     # -- Step 8: Fix versions -----------------------------------------------
@@ -893,7 +1011,7 @@ def _run_plan_inner(
     console.print()
     _check_and_create_fix_versions(
         client, team_config.project_key, needed_versions, console,
-        assume_yes=assume_yes,
+        assume_yes=assume_yes, report=report, secrets=secrets,
     )
 
     # -- Step 9: Duplicate warning + confirm --------------------------------
@@ -905,6 +1023,9 @@ def _run_plan_inner(
         f"\nCreate these {total} tickets?", default=False, console=console
     ):
         console.print("[red]Aborted.[/]")
+        report.error = abort_info(
+            "User declined ticket creation at the final confirmation."
+        )
         sys.exit(1)
 
     # -- Step 10: Create epics (resume-aware) -------------------------------
@@ -943,10 +1064,12 @@ def _run_plan_inner(
                 report.issues.append(
                     IssueResult(
                         template_key=tk, kind="epic",
-                        status="failed", error=str(exc),
+                        status="failed",
+                        error=sanitize_message(str(exc), secrets=secrets),
                     )
                 )
                 report.counts["failed"] = report.counts.get("failed", 0) + 1
+                report.error = error_info(exc, secrets=secrets)
                 persist()
                 console.print(f"\n[red bold]Failed to create epic {ref_key}:[/] {exc}")
                 sys.exit(1)
@@ -997,16 +1120,16 @@ def _run_plan_inner(
     per_release_keys = _bulk_create_with_resume(
         client, final_payloads["per_release"], "per_release",
         prior_created_keys=prior_created_keys,
-        report=report, persist=persist, console=console,
+        report=report, persist=persist, console=console, secrets=secrets,
     )
     per_sprint_keys = _bulk_create_with_resume(
         client, final_payloads["per_sprint"], "per_sprint",
         prior_created_keys=prior_created_keys,
-        report=report, persist=persist, console=console,
+        report=report, persist=persist, console=console, secrets=secrets,
     )
 
     # -- Step 13: Final status flip + persist -------------------------------
-    report.ended_at = datetime.now(timezone.utc).isoformat()
+    report.ended_at = datetime.now(UTC).isoformat()
     if report.counts.get("failed", 0) == 0 and report.counts.get("created", 0) > 0:
         report.status = "success"
     elif report.counts.get("created", 0) > 0:
@@ -1028,6 +1151,7 @@ def _bulk_create_with_resume(
     report: RunReport,
     persist,
     console: Console,
+    secrets: tuple[str, ...] = (),
 ) -> list[str]:
     """Bulk-create tickets with resume support.
 
@@ -1035,7 +1159,8 @@ def _bulk_create_with_resume(
     prior report (recorded as already-created in ``report.issues``). Strips
     ``_template_key`` from remaining payloads before sending. On bulk failure,
     every remaining payload is recorded as ``status=failed`` so the user can
-    retry just those rows on the next resume.
+    retry just those rows on the next resume, and the exception is recorded
+    as ``report.error`` (``secrets`` are redacted from its message).
 
     Returns:
         List of newly-created Jira keys (does NOT include resumed keys —
@@ -1074,16 +1199,18 @@ def _bulk_create_with_resume(
             report.issues.append(
                 IssueResult(
                     template_key=tk, kind=kind,  # type: ignore[arg-type]
-                    status="failed", error=str(exc),
+                    status="failed",
+                    error=sanitize_message(str(exc), secrets=secrets),
                 )
             )
             report.counts["failed"] = report.counts.get("failed", 0) + 1
+        report.error = error_info(exc, secrets=secrets)
         persist()
         console.print(f"\n[red bold]Bulk creation failed:[/] {exc}")
         console.print("[yellow]Some tickets may have been created. Check Jira.[/]")
         sys.exit(1)
 
-    for tk, jira_key in zip(template_keys_in_order, keys):
+    for tk, jira_key in zip(template_keys_in_order, keys, strict=False):
         report.issues.append(
             IssueResult(
                 template_key=tk, kind=kind,  # type: ignore[arg-type]

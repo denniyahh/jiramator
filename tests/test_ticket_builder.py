@@ -12,7 +12,6 @@ from jiramator.config import (
     TicketTemplate,
 )
 from jiramator.ticket_builder import (
-    WRAPPED_FIELDS,
     _adf_custom_field_ids,
     _build_fields_payload,
     _strip_template_key,
@@ -23,7 +22,6 @@ from jiramator.ticket_builder import (
     build_per_sprint_tickets,
     resolve_value,
 )
-
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
