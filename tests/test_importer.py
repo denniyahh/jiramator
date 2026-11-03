@@ -730,3 +730,71 @@ class TestRunImport:
         assert result.skipped == []
         assert result.failed == []
         assert result.preview.total_rows == 1
+
+
+# ---------------------------------------------------------------------------
+# Renderers
+# ---------------------------------------------------------------------------
+
+
+def _row(row_number: int, summary: str, *, warnings: list[str] | None = None):
+    from jiramator.importer import RowBuildResult
+
+    return RowBuildResult(
+        row_number=row_number,
+        summary=summary,
+        success=True,
+        payload={"fields": {"summary": summary}},
+        warnings=warnings or [],
+    )
+
+
+def _preview(rows):
+    from jiramator.importer import PreviewReport
+
+    return PreviewReport(
+        total_rows=len(rows),
+        successful_rows=len(rows),
+        failed_rows=0,
+        mapped_columns={"Summary": "summary"},
+        auto_mapped_columns={},
+        skipped_columns=[],
+        row_results=rows,
+    )
+
+
+class TestRenderReports:
+    def test_preview_lists_rows_then_totals_last(self):
+        from jiramator.importer import render_preview_report
+
+        output = render_preview_report(_preview([_row(i, f"S{i}") for i in range(1, 8)]), preview_rows=5)
+        lines = output.splitlines()
+
+        assert lines[0] == "Import preview"
+        assert "Row 5: S5" in lines
+        assert "Row 6: S6" not in lines
+        assert lines[-2] == "... 2 more row(s) not shown (use --preview-rows to show more)"
+        assert lines[-1] == "total_rows=7 successful=7 failed=0"
+
+    def test_execution_report_lists_every_row_in_order_with_totals_last(self):
+        from jiramator.importer import ImportRunResult, render_import_execution_report
+
+        rows = [_row(i, f"S{i}") for i in range(1, 8)]
+        rows[6] = _row(7, "S7", warnings=["Row 7: could not resolve assignee 'x'"])
+        result = ImportRunResult(
+            preview=_preview(rows),
+            created=[(1, "S1", "CA-1"), (4, "S4", "CA-4"), (7, "S7", "CA-7")],
+            skipped=[(3, "S3", "CA-3")],
+            failed=[(2, "S2", "boom"), (5, "S5", "bad"), (6, "S6", "bad")],
+        )
+
+        lines = render_import_execution_report(result).splitlines()
+        row_lines = [line for line in lines if line.startswith("Row ")]
+
+        assert lines[0] == "Import results"
+        assert [line.split(":")[0] for line in row_lines] == [f"Row {i}" for i in range(1, 8)]
+        assert row_lines[0] == "Row 1: created CA-1 - S1"
+        assert row_lines[1] == "Row 2: FAILED - S2: boom"
+        assert row_lines[2] == "Row 3: skipped (duplicate summary already exists as CA-3) - S3"
+        assert lines[-2] == "  warning: Row 7: could not resolve assignee 'x'"
+        assert lines[-1] == "created=3 skipped=1 failed=3"

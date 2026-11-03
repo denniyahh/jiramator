@@ -7,6 +7,8 @@ import pytest
 
 from jiramator.config import BulkCreateConfig, OrgConfig
 from jiramator.updater import (
+    RowUpdateResult,
+    UpdatePreviewReport,
     UpdateRunResult,
     build_row_update_payload,
     build_update_preview_report,
@@ -448,3 +450,42 @@ class TestRenderReports:
         assert "failed=1" in output
         assert "CA-2" in output
         assert "not found" in output
+
+    def test_preview_report_puts_totals_last(self):
+        rows = [{"Key": f"CA-{i}", "Platform": "Calcs"} for i in range(1, 4)]
+        report = build_update_preview_report(rows, key_column="Key", org_config=_org_config())
+
+        lines = render_update_preview_report(report, preview_rows=2).splitlines()
+
+        assert lines[-2] == "... 1 more row(s) not shown (use --preview-rows to show more)"
+        assert lines[-1].startswith("total_rows=3 ")
+
+    def test_execution_report_lists_rows_in_order_with_totals_last(self):
+        preview = UpdatePreviewReport(
+            total_rows=3,
+            no_op_rows=0,
+            failed_rows=0,
+            mapped_columns={},
+            auto_mapped_columns={},
+            skipped_columns=[],
+            row_results=[
+                RowUpdateResult(row_number=n, issue_key=f"CA-{n}", success=True, payload=None)
+                for n in (1, 2, 3)
+            ],
+        )
+        result = UpdateRunResult(
+            preview=preview,
+            updated=[(1, "CA-1"), (3, "CA-3")],
+            skipped=[],
+            failed=[(2, "CA-2", "not found")],
+        )
+
+        lines = render_update_execution_report(result).splitlines()
+
+        assert lines[0] == "Update results"
+        assert lines[1:] == [
+            "Row 1 (CA-1): updated",
+            "Row 2 (CA-2): FAILED - not found",
+            "Row 3 (CA-3): updated",
+            "updated=2 skipped=0 failed=1",
+        ]

@@ -18,6 +18,13 @@ All notable changes to Jiramator are documented here. This project adheres to
   `field_types` still win), and `story_points` defaults to `number` for
   offline previews. A non-numeric value fails only that `import` row, with
   the column named, instead of aborting the run.
+- **Consistent `import`/`update` run output.** A live run printed the dry-run
+  preview (first 5 rows only) followed by a separate execution summary, so
+  the first rows were formatted differently and the totals line landed in
+  the middle. Live runs now print one report: column mappings, every row in
+  spreadsheet order with its outcome and warnings, then the totals line last.
+  Warnings for rows beyond `--preview-rows` are no longer dropped. Dry-run
+  previews also end with the totals line and note how many rows were hidden.
 
 ## [1.3.0] — 2026-10-16
 
