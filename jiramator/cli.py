@@ -713,7 +713,6 @@ def import_command(
         report.status = "failed"
     write_report_atomic(report, report_path)
 
-    console.print(render_preview_report(result.preview, preview_rows=preview_rows))
     console.print(render_import_execution_report(result))
     if result.failed:
         sys.exit(1)
@@ -872,7 +871,6 @@ def update_command(
     )
     write_report_atomic(report, report_path)
 
-    console.print(render_update_preview_report(result.preview, preview_rows=preview_rows))
     console.print(render_update_execution_report(result))
     if result.failed:
         sys.exit(1)

@@ -550,13 +550,8 @@ def run_import(
     )
 
 
-def render_preview_report(report: PreviewReport, *, preview_rows: int = 5) -> str:
-    """Render a plain-text preview report for CLI output."""
-    lines = [
-        "Import preview",
-        f"total_rows={report.total_rows} successful={report.successful_rows} failed={report.failed_rows}",
-    ]
-
+def _render_column_mapping(report: PreviewReport) -> list[str]:
+    lines: list[str] = []
     if report.mapped_columns:
         mapped = ", ".join(f"{src}->{dst}" for src, dst in sorted(report.mapped_columns.items()))
         lines.append(f"mapped_columns: {mapped}")
@@ -567,6 +562,12 @@ def render_preview_report(report: PreviewReport, *, preview_rows: int = 5) -> st
         lines.append(f"auto_mapped_columns: {auto_mapped}")
     if report.skipped_columns:
         lines.append(f"skipped_columns: {', '.join(report.skipped_columns)}")
+    return lines
+
+
+def render_preview_report(report: PreviewReport, *, preview_rows: int = 5) -> str:
+    """Render a plain-text dry-run preview: mappings, rows, then totals last."""
+    lines = ["Import preview", *_render_column_mapping(report)]
 
     for row in report.row_results[:preview_rows]:
         if row.success:
@@ -576,23 +577,39 @@ def render_preview_report(report: PreviewReport, *, preview_rows: int = 5) -> st
         for warning in row.warnings:
             lines.append(f"  warning: {warning}")
 
+    hidden = len(report.row_results) - preview_rows
+    if hidden > 0:
+        lines.append(f"... {hidden} more row(s) not shown (use --preview-rows to show more)")
+
+    lines.append(
+        f"total_rows={report.total_rows} successful={report.successful_rows} failed={report.failed_rows}"
+    )
     return "\n".join(lines)
 
 
 def render_import_execution_report(result: ImportRunResult) -> str:
-    """Render a plain-text execution summary for CLI output."""
-    lines = [
-        "Import execution summary",
-        f"created={len(result.created)} skipped={len(result.skipped)} failed={len(result.failed)}",
-    ]
+    """Render a live import's results: mappings, every row in sheet order, then totals.
 
+    Each row appears once with its outcome and any warnings collected while
+    building or creating it, so the totals line is always the last line.
+    """
+    outcomes: dict[int, str] = {}
     for row_number, summary, issue_key in result.created:
-        lines.append(f"Row {row_number}: created {issue_key} for '{summary}'")
+        outcomes[row_number] = f"created {issue_key} - {summary}"
     for row_number, summary, issue_key in result.skipped:
-        lines.append(
-            f"Row {row_number}: duplicate summary already exists as {issue_key} for '{summary}'"
-        )
+        outcomes[row_number] = f"skipped (duplicate summary already exists as {issue_key}) - {summary}"
     for row_number, summary, error in result.failed:
-        lines.append(f"Row {row_number}: failed to create '{summary}' - {error}")
+        outcomes[row_number] = f"FAILED - {summary}: {error}"
 
+    warnings_by_row = {row.row_number: row.warnings for row in result.preview.row_results}
+
+    lines = ["Import results", *_render_column_mapping(result.preview)]
+    for row_number in sorted(outcomes):
+        lines.append(f"Row {row_number}: {outcomes[row_number]}")
+        for warning in warnings_by_row.get(row_number, []):
+            lines.append(f"  warning: {warning}")
+
+    lines.append(
+        f"created={len(result.created)} skipped={len(result.skipped)} failed={len(result.failed)}"
+    )
     return "\n".join(lines)

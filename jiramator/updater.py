@@ -349,17 +349,8 @@ def run_update(
 # ---------------------------------------------------------------------------
 
 
-def render_update_preview_report(report: UpdatePreviewReport, *, preview_rows: int = 5) -> str:
-    """Render a plain-text preview report for CLI output."""
-    lines = [
-        "Update preview",
-        (
-            f"total_rows={report.total_rows} "
-            f"no_op={report.no_op_rows} "
-            f"failed={report.failed_rows}"
-        ),
-    ]
-
+def _render_update_column_mapping(report: UpdatePreviewReport) -> list[str]:
+    lines: list[str] = []
     if report.mapped_columns:
         mapped = ", ".join(
             f"{src}->{dst}" for src, dst in sorted(report.mapped_columns.items())
@@ -372,6 +363,12 @@ def render_update_preview_report(report: UpdatePreviewReport, *, preview_rows: i
         lines.append(f"auto_mapped_columns: {auto_mapped}")
     if report.skipped_columns:
         lines.append(f"skipped_columns: {', '.join(report.skipped_columns)}")
+    return lines
+
+
+def render_update_preview_report(report: UpdatePreviewReport, *, preview_rows: int = 5) -> str:
+    """Render a plain-text dry-run preview: mappings, rows, then totals last."""
+    lines = ["Update preview", *_render_update_column_mapping(report)]
 
     for row in report.row_results[:preview_rows]:
         if not row.success:
@@ -384,21 +381,41 @@ def render_update_preview_report(report: UpdatePreviewReport, *, preview_rows: i
         for warning in row.warnings:
             lines.append(f"  warning: {warning}")
 
+    hidden = len(report.row_results) - preview_rows
+    if hidden > 0:
+        lines.append(f"... {hidden} more row(s) not shown (use --preview-rows to show more)")
+
+    lines.append(
+        f"total_rows={report.total_rows} "
+        f"no_op={report.no_op_rows} "
+        f"failed={report.failed_rows}"
+    )
     return "\n".join(lines)
 
 
 def render_update_execution_report(result: UpdateRunResult) -> str:
-    """Render a plain-text execution summary for CLI output."""
-    lines = [
-        "Update execution summary",
-        f"updated={len(result.updated)} skipped={len(result.skipped)} failed={len(result.failed)}",
-    ]
+    """Render a live update's results: mappings, every row in sheet order, then totals.
 
+    Each row appears once with its outcome and any warnings, so the totals
+    line is always the last line.
+    """
+    outcomes: dict[int, str] = {}
     for row_number, issue_key in result.updated:
-        lines.append(f"Row {row_number}: updated {issue_key}")
+        outcomes[row_number] = f"({issue_key}): updated"
     for row_number, issue_key, reason in result.skipped:
-        lines.append(f"Row {row_number} ({issue_key}): skipped — {reason}")
+        outcomes[row_number] = f"({issue_key}): skipped - {reason}"
     for row_number, issue_key, error in result.failed:
-        lines.append(f"Row {row_number} ({issue_key}): failed — {error}")
+        outcomes[row_number] = f"({issue_key}): FAILED - {error}"
 
+    warnings_by_row = {row.row_number: row.warnings for row in result.preview.row_results}
+
+    lines = ["Update results", *_render_update_column_mapping(result.preview)]
+    for row_number in sorted(outcomes):
+        lines.append(f"Row {row_number} {outcomes[row_number]}")
+        for warning in warnings_by_row.get(row_number, []):
+            lines.append(f"  warning: {warning}")
+
+    lines.append(
+        f"updated={len(result.updated)} skipped={len(result.skipped)} failed={len(result.failed)}"
+    )
     return "\n".join(lines)
