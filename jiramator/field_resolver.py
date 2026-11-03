@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from jiramator.config import OrgConfig
-from jiramator.value_coercion import coerce_field_value
+from jiramator.value_coercion import coerce_field_value, has_builtin_field_type
 
 
 @dataclass(frozen=True)
@@ -171,6 +171,17 @@ def resolve_fields_map(
     return resolved, unresolved
 
 
+def _jira_field_schema(
+    jira_field: str,
+    jira_fields: list[dict[str, Any]] | None,
+) -> dict[str, Any] | None:
+    for field in jira_fields or []:
+        if field.get("id") == jira_field:
+            schema = field.get("schema")
+            return schema if isinstance(schema, dict) else None
+    return None
+
+
 def build_and_coerce_field_value(
     source_header: str,
     raw_value: Any,
@@ -188,7 +199,8 @@ def build_and_coerce_field_value(
         raw_value: Raw cell value (string, number, etc.).
         org_config: Org config providing aliases, custom field IDs, and
             bulk_create settings (field_types, auto_lookup_unknown_fields).
-        jira_fields: Optional live Jira field metadata for auto-resolution.
+        jira_fields: Optional live Jira field metadata, used for auto-resolution
+            and to infer a coercion type (e.g. `number`) from the field schema.
 
     Returns:
         A (ResolvedField, coerced_value) tuple.  ``coerced_value`` is None
@@ -199,10 +211,15 @@ def build_and_coerce_field_value(
     if resolved.jira_field is None:
         return resolved, None
 
-    if resolved.logical_name in org_config.bulk_create.field_types:
+    if resolved.logical_name in org_config.bulk_create.field_types or has_builtin_field_type(resolved.logical_name):
         coercion_key = resolved.logical_name
     else:
         coercion_key = resolved.jira_field
 
-    coerced = coerce_field_value(coercion_key, raw_value, org_config.bulk_create)
+    coerced = coerce_field_value(
+        coercion_key,
+        raw_value,
+        org_config.bulk_create,
+        jira_schema=_jira_field_schema(resolved.jira_field, jira_fields),
+    )
     return resolved, coerced

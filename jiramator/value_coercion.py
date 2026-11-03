@@ -20,7 +20,53 @@ _BUILTIN_FIELD_TYPES = {
     # because it contains newline characters."), which multi-line spreadsheet
     # cells routinely produce.
     "summary": "single_line",
+    # Spreadsheet cells are read as strings ("2", "0.5"), but Jira rejects a
+    # string for a number field ("Operation value must be a number"). This
+    # covers offline previews; live runs also infer `number` from Jira's
+    # field schema (see `resolve_field_type`).
+    "story_points": "number",
 }
+
+# Jira field `schema.type` values (from /rest/api/3/field) mapped to the
+# coercion type they require when no explicit/built-in type applies.
+_SCHEMA_FIELD_TYPES = {
+    "number": "number",
+}
+
+
+def has_builtin_field_type(field_name: str) -> bool:
+    """Return whether jiramator ships a default coercion type for a field name."""
+    return field_name in _BUILTIN_FIELD_TYPES
+
+
+def resolve_field_type(
+    field_name: str,
+    config: BulkCreateConfig,
+    *,
+    jira_schema: dict[str, Any] | None = None,
+) -> str | None:
+    """Determine the coercion type for a field.
+
+    Precedence: org ``field_types`` > built-in defaults > live Jira schema.
+
+    Args:
+        field_name: Logical name or Jira field ID used as the coercion key.
+        config: Bulk-create config holding explicit ``field_types``.
+        jira_schema: Optional ``schema`` dict for the field from Jira's
+            ``/rest/api/3/field`` metadata.
+
+    Returns:
+        The coercion type name, or None to pass the value through unchanged.
+    """
+    explicit = config.field_types.get(field_name)
+    if explicit:
+        return explicit
+    builtin = _BUILTIN_FIELD_TYPES.get(field_name)
+    if builtin:
+        return builtin
+    if jira_schema:
+        return _SCHEMA_FIELD_TYPES.get(jira_schema.get("type"))
+    return None
 
 
 def to_single_line(value: Any) -> str:
@@ -76,9 +122,26 @@ def _resolve_value_alias(field_name: str, value: str, config: BulkCreateConfig) 
     return aliases.get(value, value)
 
 
-def coerce_field_value(field_name: str, raw_value: Any, config: BulkCreateConfig) -> Any:
-    """Coerce a raw logical value into the Jira REST payload shape for a field."""
-    field_type = config.field_types.get(field_name, _BUILTIN_FIELD_TYPES.get(field_name))
+def coerce_field_value(
+    field_name: str,
+    raw_value: Any,
+    config: BulkCreateConfig,
+    *,
+    jira_schema: dict[str, Any] | None = None,
+) -> Any:
+    """Coerce a raw logical value into the Jira REST payload shape for a field.
+
+    Args:
+        field_name: Logical name or Jira field ID used as the coercion key.
+        raw_value: Raw value (typically a spreadsheet cell string).
+        config: Bulk-create config holding ``field_types`` and aliases.
+        jira_schema: Optional live Jira ``schema`` dict for the field, used to
+            infer a type (e.g. ``number``) when none is configured.
+
+    Returns:
+        The value shaped for the Jira REST payload.
+    """
+    field_type = resolve_field_type(field_name, config, jira_schema=jira_schema)
 
     if field_type == "name_object":
         return {"name": str(raw_value).strip()}
