@@ -132,6 +132,26 @@ class TestCoerceFieldValue:
         assert coerce_field_value("overall_risk_value", "10", bulk_create_config) == 10
         assert coerce_field_value("overall_risk_value", "10.5", bulk_create_config) == 10.5
 
+    def test_number_inferred_from_jira_schema(self, bulk_create_config: BulkCreateConfig):
+        from jiramator.value_coercion import coerce_field_value
+
+        schema = {"type": "number", "custom": "com.atlassian.jira.plugin.system.customfieldtypes:float"}
+
+        assert coerce_field_value("customfield_10026", "2", bulk_create_config, jira_schema=schema) == 2
+        assert coerce_field_value("customfield_10026", "0.5", bulk_create_config, jira_schema=schema) == 0.5
+
+    def test_explicit_field_type_overrides_jira_schema(self, bulk_create_config: BulkCreateConfig):
+        from jiramator.value_coercion import coerce_field_value
+
+        bulk_create_config.field_types["customfield_10026"] = "single_line"
+
+        assert coerce_field_value("customfield_10026", "2", bulk_create_config, jira_schema={"type": "number"}) == "2"
+
+    def test_story_points_is_number_by_default(self, bulk_create_config: BulkCreateConfig):
+        from jiramator.value_coercion import coerce_field_value
+
+        assert coerce_field_value("story_points", "3", bulk_create_config) == 3
+
     def test_passthrough_for_untyped_field(self, bulk_create_config: BulkCreateConfig):
         from jiramator.value_coercion import coerce_field_value
 

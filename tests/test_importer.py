@@ -218,6 +218,43 @@ class TestBuildRowPayload:
         assert result.summary == "<missing summary>"
         assert result.error == "Row 5: required field 'summary' is missing or empty"
 
+    def test_story_points_string_is_sent_as_number(self):
+        from jiramator.importer import build_row_payload
+
+        org_config = _org_config()
+        org_config.custom_fields["story_points"] = "customfield_10026"
+        jira_fields = [{"id": "customfield_10026", "name": "Story Points", "schema": {"type": "number"}}]
+
+        result = build_row_payload(
+            {"Summary": "Do the thing", "Story Points": "0.5"},
+            row_number=1,
+            org_config=org_config,
+            team_config=_team_config(),
+            jira_fields=jira_fields,
+        )
+
+        assert result.success is True
+        assert result.payload["fields"]["customfield_10026"] == 0.5
+
+    def test_unparseable_number_is_a_row_error(self):
+        from jiramator.importer import build_row_payload
+
+        org_config = _org_config()
+        org_config.custom_fields["story_points"] = "customfield_10026"
+
+        result = build_row_payload(
+            {"Summary": "Do the thing", "story_points": "TBD"},
+            row_number=3,
+            org_config=org_config,
+            team_config=_team_config(),
+        )
+
+        assert result.success is False
+        assert result.payload is None
+        assert result.summary == "Do the thing"
+        assert result.error is not None
+        assert result.error.startswith("Row 3: could not convert 'story_points' value 'TBD'")
+
     def test_empty_values_are_omitted_without_warning(self):
         from jiramator.importer import build_row_payload
 

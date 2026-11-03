@@ -11,6 +11,13 @@ All notable changes to Jiramator are documented here. This project adheres to
   with "The summary is invalid because it contains newline characters."
   Summary lines are now joined with single spaces (blank lines dropped), and
   the `import` preview warns when a row's summary was joined.
+- **Numeric fields from spreadsheets are sent as numbers.** Spreadsheet cells
+  are read as text, so Story Points and other number fields failed with
+  "Operation value must be a number" unless listed in `field_types`. `import`
+  and `update` now infer `number` from Jira's live field schema (explicit
+  `field_types` still win), and `story_points` defaults to `number` for
+  offline previews. A non-numeric value fails only that `import` row, with
+  the column named, instead of aborting the run.
 
 ## [1.3.0] — 2026-10-16
 

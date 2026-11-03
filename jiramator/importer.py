@@ -144,12 +144,25 @@ def build_row_payload(
         if raw_value is None or raw_value == "":
             continue
 
-        resolved, coerced = _build_resolved_value(
-            source_header,
-            raw_value,
-            org_config,
-            jira_fields=jira_fields,
-        )
+        try:
+            resolved, coerced = _build_resolved_value(
+                source_header,
+                raw_value,
+                org_config,
+                jira_fields=jira_fields,
+            )
+        except (TypeError, ValueError) as exc:
+            # Fail just this row (e.g. "TBD" in a number field) rather than
+            # aborting the whole import.
+            return RowBuildResult(
+                row_number=row_number,
+                summary=to_single_line(row.get("Summary") or row.get("summary") or "<invalid row>"),
+                success=False,
+                payload=None,
+                warnings=warnings,
+                error=f"Row {row_number}: could not convert '{source_header}' value {raw_value!r}: {exc}",
+                resolved_columns=resolved_columns,
+            )
         resolved_columns[source_header] = resolved
 
         if resolved.jira_field is None:

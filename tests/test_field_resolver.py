@@ -139,3 +139,33 @@ class TestResolveFieldsMap:
         assert resolved["Summary"].jira_field == "summary"
         assert resolved["Issue Type"].jira_field == "issuetype"
         assert unresolved == ["Unknown Header"]
+
+
+class TestBuildAndCoerceFieldValue:
+    def test_story_points_header_resolved_via_jira_is_coerced_to_number(self, org_config: OrgConfig):
+        from jiramator.field_resolver import build_and_coerce_field_value
+
+        jira_fields = [
+            {"id": "customfield_10026", "name": "Story Points", "schema": {"type": "number"}},
+        ]
+
+        resolved, whole = build_and_coerce_field_value("Story Points", "2", org_config, jira_fields=jira_fields)
+        _, fractional = build_and_coerce_field_value("Story Points", "0.5", org_config, jira_fields=jira_fields)
+
+        assert resolved.jira_field == "customfield_10026"
+        assert whole == 2
+        assert fractional == 0.5
+
+    def test_unconfigured_numeric_custom_field_inferred_from_schema(self, org_config: OrgConfig):
+        from jiramator.field_resolver import build_and_coerce_field_value
+
+        jira_fields = [
+            {"id": "customfield_15000", "name": "Business Value", "schema": {"type": "number"}},
+            {"id": "customfield_15001", "name": "Team Code", "schema": {"type": "string"}},
+        ]
+
+        _, number = build_and_coerce_field_value("Business Value", "13", org_config, jira_fields=jira_fields)
+        _, text = build_and_coerce_field_value("Team Code", "13", org_config, jira_fields=jira_fields)
+
+        assert number == 13
+        assert text == "13"

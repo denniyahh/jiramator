@@ -358,6 +358,13 @@ org config's default) with its fields coerced to the right type (e.g.
 `Labels` split on commas, `Overall Risk Value` read as a number) — so you can
 catch a typo before anything is created.
 
+Numeric Jira fields (Story Points, Story point estimate, any number-type
+custom field) are converted from spreadsheet text to numbers automatically,
+using the field type Jira reports, so no `field_types` entry is needed. An
+explicit `bulk_create.field_types` entry always wins. A value that isn't a
+number (e.g. `TBD`) fails just that row, naming the column; the other rows
+are still created.
+
 > **Risk tickets and dropdown fields:** Several Risk-specific fields (Code
 > Complexity, QA Testing, Risk Impact, Risk Mitigation) are Jira dropdowns
 > whose option list includes a descriptive label, not just a number — e.g.
